@@ -4,7 +4,7 @@ how quickly the fitted strength learns a hidden taste.
 
 The clicker is softmax-consistent with the fit's own model: it picks
 argmax(hidden + Gumbel noise), which is exactly the generative story
-`strength()` assumes — so learning speed is measured fairly.
+`fit()` assumes — so learning speed is measured fairly.
 """
 import os
 import sys

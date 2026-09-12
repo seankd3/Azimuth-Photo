@@ -121,7 +121,7 @@ def main() -> int:
     print(page)
     if "--build" in sys.argv[1:]:
         return 0
-    handler = lambda *a, **k: http.server.SimpleHTTPRequestHandler(*a, directory=str(OUTPUT.parent), **k)  # noqa: E731
+    handler = lambda *a, **k: http.server.SimpleHTTPRequestHandler(*a, directory=str(OUTPUT.parent), **k)
     with http.server.ThreadingHTTPServer(("127.0.0.1", PORT), handler) as server:
         print(f"http://127.0.0.1:{PORT}/harness.html", flush=True)
         server.serve_forever()

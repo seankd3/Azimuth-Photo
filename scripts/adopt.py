@@ -242,7 +242,6 @@ def adopt_embeddings(v1, v2, hash_map) -> dict[str, int]:
 
 
 def seed_tiles(v2, id_map, store, previews: str) -> dict[str, int]:
-    import io
 
     import render
     from model import cache

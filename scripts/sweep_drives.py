@@ -14,7 +14,7 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web"))
 
-from model import copies, drives  # noqa: E402
+from model import copies, drives
 
 DB = r"C:/Azimuth Photo/data/catalog/azimuth.db"
 

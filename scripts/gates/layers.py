@@ -30,7 +30,7 @@ from common import read, tracked
 PURE = {"web/model/": "model", "web/pixels/": "pixels", "web/photo/": "photo"}
 BELOW = {"model": {"photo"}}
 UI_ORDER = ("kit", "net", "store", "lens", "shell")
-JS_IMPORT = re.compile(r"""^\s*import\b[^'"]*['"]([^'"]+)['"]""", re.M)
+JS_IMPORT = re.compile(r"""^\s*import\b[^'"]*['"]([^'"]+)['"]""", re.MULTILINE)
 
 
 def _first_party(root) -> set[str]:

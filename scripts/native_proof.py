@@ -85,8 +85,9 @@ def main() -> int:
 
     sys.path.insert(0, str(WEB))
 
-    import desktop as edge
     import home
+
+    import desktop as edge
 
     product = edge.Desktop(home.current())
     window = webview.create_window(

@@ -8,7 +8,6 @@ import subprocess
 from collections import Counter
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = ROOT / "docs" / "REWRITE_LEDGER.md"
 REGISTERED_ROW = re.compile(
