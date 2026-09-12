@@ -425,7 +425,7 @@ function renderInspector(panel, selected, actions = {}) {
   const shown = marked && marked.size > 1
     ? `set:${[...marked].join(',')}:${[...(actions.photos?.values() || [])].filter((p) => marked.has(p.id)).map((p) => `${p.id}.${p.status}.${p.file_size}`).join('|')}`
     : selected
-      ? `one:${JSON.stringify(selected)}`
+      ? `one:${JSON.stringify(selected)}:${actions.merged?.id === selected.id ? 'merged' : ''}`
       : `glance:${JSON.stringify([actions.counts, actions.drives, actions.working])}`;
   if (panel.dataset.shown === shown) return;
   panel.dataset.shown = shown;
@@ -529,7 +529,8 @@ function renderInspector(panel, selected, actions = {}) {
     ['Eyes', { open: 'Open', closed: 'Closed', unsure: 'Cannot tell' }[selected.sharp?.eyes] || '', { said: true }],
     ['Panorama', selected.sweep
       ? `${numbered(selected.sweep.members.length, 'frame')} sweep ${selected.sweep.direction}, ${Math.round(selected.sweep.overlap * 100)}% overlap`
-        + (selected.sweep.preview ? ' \u2014 press to see the merge' : ' \u2014 press to merge a preview')
+        + (actions.merged?.id === selected.id ? ' \u2014 press to see the frame'
+          : selected.sweep.preview ? ' \u2014 press to see the merge' : ' \u2014 press to merge a preview')
         + (selected.stack_of || selected.stack ? '' : '; S stacks them')
       : '', { sweep: selected.sweep }],
     ['Dimensions', selected.width && selected.height ? `${selected.width} × ${selected.height}` : ''],
@@ -572,7 +573,8 @@ function renderInspector(panel, selected, actions = {}) {
       // can find.
       control.classList.add('is-link');
       control.dataset.action = 'merge-sweep';
-      control.title = how.sweep.preview ? 'Open the merged preview' : 'Merge a preview of the sweep';
+      control.title = actions.merged?.id === selected.id ? 'Show the frame again'
+        : how.sweep.preview ? 'Open the merged preview' : 'Merge a preview of the sweep';
       control.addEventListener('click', () => actions.mergeSweep(selected));
     } else if (how.chip && actions.applyChip) {
       control.classList.add('is-link');

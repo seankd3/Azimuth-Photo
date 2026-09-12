@@ -795,11 +795,10 @@ function closeDriveDialog() {
 
 
 function closeLoupe() {
-  merged = null;
   if (loupe.classList.contains('is-full')) toggleFull(false);
   const back = loupeReturnsTo || 'library';
   loupeReturnsTo = null;
-  if (loupeOpen()) update({ view: back, ...(back === 'rank' ? { selected: null } : {}) });
+  if (loupeOpen()) update({ view: back, merged: null, ...(back === 'rank' ? { selected: null } : {}) });
   // The strip keeps its cells: a reopen finds them where they were and
   // rebuilds only what differs, instead of flashing an empty band.
   loupeView.reset();
@@ -1393,42 +1392,39 @@ function teachLoupe() {
   if (times < 3) remember(TAUGHT_KEY, times + 1);
 }
 
-// The merged panorama the loupe stands in for a sweep's frame, once made:
-// {id, url, width, height}. Cleared when the loupe closes, so Enter on the
-// frame shows the frame.
-let merged = null;
+// The merged panorama the loupe stands in for a sweep's frame lives in the
+// store (`merged`), so the fact's words and the loupe agree; cleared when
+// the loupe closes, so Enter on the frame shows the frame.
 let merging = null;
 
 async function mergeSweep(photo) {
   // Pressed while the merge is shown: the frame again.
-  if (merged?.id === photo.id && loupeOpen()) {
-    merged = null;
-    renderLoupe(photo);
+  if (read().merged?.id === photo.id && loupeOpen()) {
+    update({ merged: null });
     return;
   }
   const held = photo.sweep?.preview;
   if (held) {
-    merged = { id: photo.id, ...held };
+    update({ merged: { id: photo.id, ...held } });
     showPhoto(photo);
     return;
   }
   if (merging === photo.id) return;
   merging = photo.id;
   // Work in progress goes to the status line; the toast is for outcomes.
-  update({ importing: 'Merging the sweep\u2026' });
+  update({ doing: 'Merging the sweep\u2026' });
   let made;
   try {
     made = await product.mergePreview(photo.id).catch((error) => { notify(why(error)); return undefined; });
   } finally {
     merging = null;
-    update({ importing: '' });
+    update({ doing: '' });
   }
   if (made === null) notify('The frames could not be merged.');
   if (!made) return;
   const current = read().selected;
   if (current?.id !== photo.id) return;
-  update({ selected: { ...current, sweep: { ...current.sweep, preview: made } } });
-  merged = { id: photo.id, ...made };
+  update({ selected: { ...current, sweep: { ...current.sweep, preview: made } }, merged: { id: photo.id, ...made } });
   showPhoto(read().selected);
 }
 
@@ -1455,8 +1451,7 @@ function renderLoupe(photo) {
   // A merged panorama stands in for its frame: shown as a preview (its
   // own pixels, no larger truth behind it), until the loupe closes or an
   // edit begins -- Develop paints the frame, never the merge.
-  if (editPanel.isOpen()) merged = null;
-  const stand = merged && merged.id === photo.id ? merged : null;
+  const stand = !editPanel.isOpen() && read().merged?.id === photo.id ? read().merged : null;
   const frames = stand ? (photo.sweep?.members?.length || 0) : 0;
   if (stand) photo = { ...photo, develop: true, loupe: stand.url, width: stand.width, height: stand.height };
   const source = photo.loupe || photo.tile || '';
@@ -1464,6 +1459,7 @@ function renderLoupe(photo) {
   const caption = document.querySelector('[data-loupe-caption]');
   caption.textContent = stand ? `Merged from ${numbered(frames, 'frame')} \u00b7 the Panorama fact shows the frame` : '';
   caption.hidden = !stand;
+  if (stand) document.querySelector('[data-loupe-hint]').hidden = true;
   const note = document.querySelector('[data-loupe-note]');
   const { state, said } = presence(photo, Boolean(source));
   note.textContent = state === 'here' ? '' : said;
@@ -1487,9 +1483,8 @@ async function focusFace(photo) {
   if (!boxes.length) { notify('No face has been read on this photograph.'); return; }
   // A face is on the frame, not on the merge the loupe may be standing
   // in: the frame first, and its pixels before the zoom is placed.
-  if (merged) {
-    merged = null;
-    renderLoupe(photo);
+  if (read().merged) {
+    update({ merged: null });
     await loupeImage.decode().catch(() => {});
   }
   facing = { id: photo.id, at: facing.id === photo.id ? (facing.at + 1) % boxes.length : 0 };
@@ -1628,7 +1623,7 @@ function renderChrome(state) {
   filterBar.render(state);
   timeline.render(state);
   library.renderInspector(inspector.querySelector('[data-inspector-facts]'), state.selected,
-    { marked: state.marked, photos: state.photos, counts: state.counts, drives: state.drives, working: state.working, showFolder, applyChip, notify, mergeSweep });
+    { marked: state.marked, photos: state.photos, counts: state.counts, drives: state.drives, working: state.working, merged: state.merged, showFolder, applyChip, notify, mergeSweep });
   editPanel.follows(state.view === 'loupe' ? state.selected : null);
   const held = state.counts.photos.toLocaleString();
   // The import workspace's own panel carries its counts; the library's
@@ -2416,7 +2411,9 @@ function commands(query) {
   const want = query.toLowerCase();
   for (const node of document.querySelectorAll('[data-action]')) {
     const action = node.dataset.action;
-    const tip = TIPS[action];
+    // A control that rewrote its tooltip (Cancel or Back; merge, open or
+    // frame) is offered in its own words.
+    const tip = node.title || TIPS[action];
     if (!tip || seen.has(action) || !onScreen(node)) continue;
     if (want && !tip.toLowerCase().includes(want)) continue;
     seen.add(action);
@@ -2501,6 +2498,9 @@ density.addEventListener('input', (event) => {
   rowHeight = Number(event.target.value);
   remember(DENSITY_KEY, rowHeight);
   shell.style.setProperty('--cell', `${rowHeight}px`);
+  // The import stage lays itself out from the number; the grid is hidden
+  // there and would measure a zero-width column.
+  if (read().view === 'import') return;
   visibleGrid();
   if (read().selectedIndex !== null) {
     scrollIndexIntoView(read().selectedIndex);

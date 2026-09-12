@@ -26,6 +26,9 @@ const state = {
   survey: null,
   total: 0,
   loading: true,
+  // The merged panorama the loupe stands in for a sweep's frame, once
+  // made: {id, url, width, height}; null when the loupe closes.
+  merged: null,
   scanning: false,
   selected: null,
   selectedIndex: null,

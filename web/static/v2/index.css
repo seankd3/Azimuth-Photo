@@ -113,6 +113,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .tab-right { right: var(--right); transform: translate(50%, -50%); }
 .hide-left .tab-left { transform: translateY(-50%) scaleX(-1); border-left: 0; border-radius: 0 6px 6px 0; }
 .hide-right .tab-right { transform: translateY(-50%) scaleX(-1); border-right: 0; border-radius: 6px 0 0 6px; }
+.app-shell.is-intaking .tab-right { display: none; }
 /* the top bar's handle sits on the top seam beside the left tab: the two
    make one corner where the seams meet, clear of every control */
 .tab-top { top: var(--top); left: calc(var(--left) + 14px); width: 40px; height: 12px; transform: translateY(-100%); border-radius: 6px; font-size: var(--t-label); }
@@ -981,8 +982,9 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 /* Import is a workspace: the stage lives where the grid does, the panel
    sits in the inspector's seat, and the window's own chrome frames both. */
 .import-stage {
+  position: relative;   /* the empty state's box is the stage, not the window */
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--cell, 190px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(var(--cell, 190px), 100%), 1fr));
   gap: 10px;
   padding: 16px 20px 40px;
   align-content: start;
@@ -1205,6 +1207,10 @@ body:has(.loupe-stage:not([hidden]):not(.is-full)) .toast { bottom: calc(var(--s
   background: rgb(20 21 24 / 75%);
   color: var(--text-2);
   font-size: var(--t-meta);
+  max-width: calc(100% - 140px);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .loupe-stage.is-full .loupe-caption { bottom: 14px; }
 .edit-groups.is-waiting { opacity: .45; }
