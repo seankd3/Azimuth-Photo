@@ -938,3 +938,10 @@ The first round run by the `polish` workflow from a cloud session: eight scouts,
 | RK1 | "the rank game still lags esp on 2 image mode": the buffer held one set's worth, a pair pick takes both cards, so the next pick waited on the bridge and, on a wide pair, on a 4,096 px decode | the buffer holds two sets' worth and the fill asks for the remainder; a card paints the decoded bitmap when it is ready, else the grid tile at once with the loupe swapped in when its decode lands; the swap is synchronous in the harness (msToPaint 0) | shipped |
 | RK2 | "ditch the orange outline that shows on the next image on the previous pick": a keyboard pick kept the cursor at the picked slot, so the stranger arriving there wore the accent | no cursor survives a pick; the keyboard stays on the stage (the numbers, Enter and, in a pair, the arrows still pick), and in a set an arrow brings the cursor back | shipped |
 | RK3 | The harness rebuilt its document only when it was missing, so a proof could run against the UI of an hour ago | the window's rule: rebuilt when any source under `web/static/v2/` or the template is newer | shipped |
+
+## Craft, from the owner's sitting (2026-09-12)
+
+| # | Finding | Fix | Status |
+|---|---|---|---|
+| CR1 | "Landscape photos vs landscape orientation": the search drop offered "Landscape" under Kind and shape and the chip said "Landscape", which reads as a subject; the drop and the chip each held their own copy of the three words; adding a chip from the search box was answered by nothing, its removal by a toast | one vocabulary, exported from the filter bar and used by the drop: "Wide (landscape)", "Tall (portrait)", "Square"; a filter added from a text field is answered in the chip's own words ("Filter added — Wide (landscape)."), the mirror of the removal toast. The harness stub answered `facets` with an empty object, so the drop had offered no shape for any probe to see; it answers the verb's four lists now | shipped |
+

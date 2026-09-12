@@ -8,6 +8,7 @@
 // box into the command line: every verb on the screen, by its tooltip.
 
 import { icon } from '../kit/icons.js';
+import { said } from './filters.js';
 
 const RECENT_KEY = 'azimuth.recent-searches';
 
@@ -54,8 +55,6 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
   }
 
   // ---- what the drop offers, as data ----
-
-  const SAY = { landscape: 'Landscape', portrait: 'Portrait', square: 'Square' };
 
   const commanding = () => box.value.trimStart().startsWith('>');
 
@@ -134,9 +133,9 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
         label: r.folder, count: r.photos, glyph: 'folder',
         run: () => applyChip({ is: 'folder', values: [r.folder] }),
       }));
-    const shapes = held.orientations.filter((o) => match(SAY[o.orientation] || ''))
+    const shapes = held.orientations.filter((o) => match(said(o.orientation)))
       .map((o) => ({
-        label: SAY[o.orientation], count: o.photos, glyph: o.orientation === 'portrait' ? 'portrait' : 'landscape',
+        label: said(o.orientation), count: o.photos, glyph: o.orientation === 'portrait' ? 'portrait' : 'landscape',
         run: () => applyChip({ is: 'orientation', values: [o.orientation] }),
       }));
     if (kinds.length || shapes.length) sections.push(['Kind and shape', [...kinds, ...shapes].slice(0, CAP)]);
