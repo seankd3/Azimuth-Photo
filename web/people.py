@@ -194,7 +194,10 @@ def repeople(conn) -> int:
     group_of = {f"{owners[face][0]}:{owners[face][1]}": at
                 for at, (group, _) in enumerate(merged) for face in group}
     kept_apart = set()
-    for row in conn.execute("SELECT subject, value FROM decisions WHERE family = ?", (APART,)):
+    # Each pair's last word: a No taken back is not a No.
+    for row in conn.execute(
+            "SELECT subject, value FROM decisions WHERE family = ? AND id IN"
+            " (SELECT MAX(id) FROM decisions WHERE family = ? GROUP BY subject)", (APART, APART)):
         if not decisions.loaded(row):
             continue
         sides = [group_of.get(face) for face in str(row["subject"]).split("|")]
@@ -253,14 +256,16 @@ def maybe_same(conn) -> list[dict]:
     return _summary(conn)["maybe"]
 
 
-def keep_apart(conn, a: str, b: str) -> dict:
+def keep_apart(conn, a: str, b: str, apart: bool = True) -> dict:
     """The owner's No: these two groups are two people. Remembered against
-    the two faces, so the wall never asks about their groups again."""
+    the two faces, so the wall never asks about their groups again; the
+    same word taken back (`apart=False`) is the No undone, and the wall may
+    ask again."""
 
     pair = "|".join(sorted((str(a), str(b))))
-    decisions.decide(conn, pair, APART, True)
+    decisions.decide(conn, pair, APART, bool(apart))
     conn.commit()
-    return {"apart": pair}
+    return {"apart": pair, "kept": bool(apart)}
 
 
 def name(conn, exemplar: str, called: str) -> dict:

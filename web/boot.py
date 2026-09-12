@@ -1145,11 +1145,11 @@ class Library:
         self._open()
         return persons.unname_since(self.conn, int(since), None if until is None else int(until))
 
-    def keep_apart(self, a: str, b: str) -> dict:
+    def keep_apart(self, a: str, b: str, apart: bool = True) -> dict:
         import people as persons
 
         self._open()
-        return persons.keep_apart(self.conn, a, b)
+        return persons.keep_apart(self.conn, a, b, apart)
 
     def unname_person(self, exemplar: str) -> dict:
         """Take a first naming back: the face is a Someone again."""

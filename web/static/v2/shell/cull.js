@@ -4,6 +4,7 @@
 // says which identities changed and what to, and the window applies it
 // whatever the count. Works the same over the grid and the loupe.
 import { numbered } from '../kit/words.js';
+import { why } from '../kit/why.js';
 
 export const CULL_MENU = Object.freeze([
   { action: 'pick', label: 'Pick — P' },
@@ -58,7 +59,7 @@ export function createCullWorkflow({ product, read, reload, patch, removed, sele
         else if (action.advance && ids.length === 1) await selectIndex(selectedIndex + 1);
       }
       const passed = result.unidentified
-        ? ` ${result.unidentified === 1 ? 'One is' : `${result.unidentified} are`} not identified yet.` : '';
+        ? ` ${result.unidentified === 1 ? 'One is' : `${result.unidentified.toLocaleString()} are`} not identified yet.` : '';
       const back = () => product.undoCull(result.changed).then(seat ? seat.restored : reload);
       // One frame flagged or turned shows itself on the tile in the same
       // frame; a toast would say what the eye already saw. Its way back
@@ -67,7 +68,7 @@ export function createCullWorkflow({ product, read, reload, patch, removed, sele
       if (ids.length === 1 && !action.removes && !passed && !seat) { undo.keep(back); say(action.message(1)); }
       else undo.show(action.message(ids.length - result.unidentified) + passed, back);
     } catch (reason) {
-      notify(reason.message);
+      notify(why(reason, 'That decision'));
     } finally {
       busy = false;
     }

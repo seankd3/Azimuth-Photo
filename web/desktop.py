@@ -553,8 +553,8 @@ class Desktop:
             self._product.rank_soon()
         return said
 
-    def keep_apart(self, a: str, b: str) -> dict:
-        said = self._run(lambda library: library.keep_apart(str(a), str(b)))
+    def keep_apart(self, a: str, b: str, apart: bool = True) -> dict:
+        said = self._run(lambda library: library.keep_apart(str(a), str(b), bool(apart)))
         if self._product is not None:
             self._product.rank_soon()
         return said

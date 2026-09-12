@@ -763,6 +763,27 @@ finding was checked and the numbers said no.
 |---|---|---|---|
 | D1 | Thirteen lines could read "1 photographs" (the drag badge, the sidebar count, the import source and summary, a person's count, the search-kept notice, Empty Trash's notice, the selection heading); twenty more spelled their own plural | one word in the kit, `count(n, one, many)`, used by every surface that says how many | shipped |
 
+## Loupe, Rank and People (eighth round, 2026-09-12 night, audited by a second model)
+
+| # | Finding | Fix | Status |
+|---|---|---|---|
+| LR1 | The live region and the status line lived inside the sidebar, so folding it (Tab, or F's clean room) silenced every spoken act and hid all work in flight, Stop included | both are the shell's: the status line at the sidebar's foot, a pill in the corner while there is work when the sidebar is folded, the live region a child of the shell | shipped |
+| LR2 | A Rank survey (N on marked frames) outlived Rank when a sidebar door left it, and silently narrowed the whole library to those frames | the render clears a survey whenever the view is neither Rank nor a look taken from it | shipped |
+| LR3 | The loupe's "cannot be shown" note was erased by the next render (the details read 120 ms later), leaving a black stage with no words | the failed source is in the store (`troubled`) and the note derives from it until the source moves | shipped |
+| LR4 | An arrow in a look taken from Rank walked into the whole library from "nowhere" and showed photograph #1 | a look from Rank is one card: the arrows stay | shipped |
+| LR5 | No on the People wall was the one act there with no way back | the No has Undo: the same word taken back, and the wall may ask again (each pair's last word counts) | shipped |
+| LR6 | At 1366 px the Rank bar's progress sentence wrapped, the bar grew and every stage's bottom fell off the window | the sentence keeps one line with an ellipsis, as the search column does | shipped |
+| LR7 | The keys sheet had no People section | the wall's keys, in its words | shipped |
+| LR8 | The loupe's first-open lesson was armed only by double-click and E; Enter, Space, F, C and D never taught | the lesson is armed where the loupe opens | shipped |
+| LR9 | Rank's size and mode buttons had no verb for the command line and no tooltip | each is an action with a standing tooltip; the disabled reason replaces it only while it holds | shipped |
+| LR10 | Rank's progress and its two settings said nothing to a screen reader | the progress is a status; the settings say their word | shipped |
+| LR11 | A faces read that failed was reported as "no face on this photograph" | the failure is said in the app's words | shipped |
+| LR12 | A pick that did not record and a failed cull spoke the bridge's words | `why()` | shipped |
+| LR13 | The loupe was named four ways (loupe, preview, Close preview) | the loupe is the loupe; Preview means a rendition with no larger truth behind it | shipped |
+| LR14 | Two lines still said photo | photograph | shipped |
+| LR15 | Three counts named no unit or grouped no digits | `numbered` | shipped |
+| LR16 | Space picks in Rank and the sheet said only Enter | Enter / Space | shipped |
+
 ## Import and inspector (seventh round, 2026-09-12 night, audited by a second model)
 
 | # | Finding | Fix | Status |

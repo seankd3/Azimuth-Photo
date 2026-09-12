@@ -64,10 +64,9 @@ const loupeView = createLoupe({
   image: loupeImage,
   inset: () => (loupe.classList.contains('is-full') ? 0 : loupeStrip.offsetHeight),
   onTrouble: () => {
-    // The file was promised and did not load — a black stage explains itself.
-    const note = document.querySelector('[data-loupe-note]');
-    note.textContent = presence({ tile_failed: true }, false).said;
-    note.hidden = false;
+    // The file was promised and did not load: a black stage explains
+    // itself, and the render keeps the explanation until the source moves.
+    update({ troubled: loupeImage.dataset.source || null });
   },
 });
 
@@ -150,7 +149,7 @@ function renderStrip(state) {
       cell.setAttribute('role', 'option');
       cell.tabIndex = index === current ? 0 : -1;
       cell.dataset.turn = photo?.rotate || 0;
-      cell.setAttribute('aria-label', photo?.tail || `Photo ${index + 1}`);
+      cell.setAttribute('aria-label', photo?.tail || `Photograph ${index + 1}`);
       if (photo?.tile) {
         const tile = document.createElement('img');
         tile.src = photo.tile;
@@ -217,6 +216,7 @@ stopImport.dataset.action = 'stop-import';
 stopImport.textContent = 'Stop';
 stopImport.hidden = true;
 status.after(stopImport);
+const shellFoot = document.querySelector('[data-foot]');
 
 function notify(message) {
   // Every transient message rides the one toast, which floats over any
@@ -1449,7 +1449,7 @@ function showPhoto(photo) {
   // told this photograph is what is being looked at). When the row changes
   // under an open loupe, `renderLoupe` swaps the picture in.
   lookAt([photo.id]);
-  if (!loupeOpen()) update({ view: 'loupe' });
+  if (!loupeOpen()) { teachLoupe(); update({ view: 'loupe' }); }
   renderLoupe(photo);
   renderStrip(read());
   const current = read().selectedIndex;
@@ -1476,9 +1476,10 @@ function renderLoupe(photo) {
   caption.hidden = !stand;
   document.querySelector('[data-loupe-hint]').hidden = Boolean(stand) || !teaching;
   const note = document.querySelector('[data-loupe-note]');
-  const { state, said } = presence(photo, Boolean(source));
+  const troubled = Boolean(source) && read().troubled === source;
+  const { state, said } = troubled ? presence({ tile_failed: true }, false) : presence(photo, Boolean(source));
   note.textContent = state === 'here' ? '' : said;
-  note.hidden = Boolean(source);
+  note.hidden = Boolean(source) && !troubled;
   // An <img> with no source still renders its alt text; while the note is
   // the whole message, the img says nothing.
   loupeImage.alt = source ? (stand ? 'The merged panorama' : (photo.tail || 'Selected photograph')) : '';
@@ -1494,7 +1495,13 @@ function renderLoupe(photo) {
 
 let facing = { id: null, at: -1 };
 async function focusFace(photo) {
-  const boxes = await product.faces(photo.id).catch(() => []);
+  let boxes;
+  try {
+    boxes = await product.faces(photo.id);
+  } catch (error) {
+    notify(why(error, 'The faces'));
+    return;
+  }
   if (!boxes.length) { notify('No face has been read on this photograph.'); return; }
   // A face is on the frame, not on the merge the loupe may be standing
   // in: the frame first, and its pixels before the zoom is placed.
@@ -1511,7 +1518,7 @@ async function focusFace(photo) {
 function openPhoto(index) {
   if (read().selectedIndex !== index) selectPhoto(index);
   const photo = read().photos.get(index);
-  if (photo) { if (!loupeOpen()) teachLoupe(); showPhoto(photo); }
+  if (photo) showPhoto(photo);
 }
 
 
@@ -1703,6 +1710,7 @@ function renderChrome(state) {
               : ['Up to date', ''];
   const statusWord = status.querySelector('[data-status-word]');
   const statusPace = status.querySelector('[data-status-pace]');
+  shellFoot.classList.toggle('is-working', Boolean(state.importing || state.doing || state.scanning || working));
   if (statusWord.textContent !== wordSaid) statusWord.textContent = wordSaid;
   const paced = pace ? ` · ${pace}` : '';
   if (statusPace.textContent !== paced) statusPace.textContent = paced;
@@ -1772,7 +1780,7 @@ function renderChrome(state) {
   const pill = document.querySelector('[data-like-pill]');
   const alike = (state.like || []).length;
   pill.hidden = !alike || state.view === 'trash' || holding || walled || intaking;
-  if (alike) pill.querySelector('[data-like-seeds]').textContent = `≈ More like ${alike === 1 ? 'this photo' : `${alike} photos`}`;
+  if (alike) pill.querySelector('[data-like-seeds]').textContent = `≈ More like ${alike === 1 ? 'this photograph' : numbered(alike, 'photograph')}`;
   const sortBox = document.querySelector('[data-sort]');
   sortBox.closest('label').hidden = state.view === 'trash' || ranking || holding || walled || intaking;
   sortBox.disabled = searching;
@@ -1855,6 +1863,9 @@ function render(state) {
   // The merge stands in only while the loupe is up: a chip, a name, a
   // folder or an album can leave the loupe without closing it.
   if (state.view !== 'loupe' && state.merged) { update({ merged: null }); return; }
+  // A survey is Rank's own round: it ends when the view is neither Rank
+  // nor a look taken from it, whichever door was used.
+  if (state.survey && !['rank', 'loupe'].includes(state.view)) { update({ survey: null }); return; }
   // Chrome first: it is what shows and hides the grid, and a grid laid out
   // while still hidden measures a zero-width column.
   renderChrome(state);
@@ -2333,6 +2344,9 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    // A look taken from Rank is one card: an arrow has nowhere to walk
+    // that is not the whole library.
+    if (loupeOpen() && loupeReturnsTo === 'rank') { event.preventDefault(); return; }
     const move = event.key === 'ArrowLeft' ? -1 : 1;
     selectIndex((current ?? (move > 0 ? -1 : read().total)) + move, extend);
     event.preventDefault();
@@ -2384,7 +2398,7 @@ const SHORTCUTS = [
     ['F', 'Leave the clean room'], ['Esc', 'Fit, then close', ['close-loupe', 'leave-rank']],
   ]],
   ['Rank', [
-    ['1\u20139, 0, -, =', 'Pick that card'], ['Arrows', 'Move, or pick a side of a pair'], ['Enter', 'Pick the selected'],
+    ['1\u20139, 0, -, =', 'Pick that card'], ['Arrows', 'Move, or pick a side of a pair'], ['Enter / Space', 'Pick the selected'],
     ['Z / F', 'Look closer'], ['P / U / X / R', 'The selected card, else the one under the mouse'],
     ['[ / ]', 'Fewer or more at once'], ['M', 'How the set is drawn'],
   ]],
@@ -2392,6 +2406,7 @@ const SHORTCUTS = [
   ['Import', [['Arrows', 'Move'], ['Shift+Arrows', 'Extend the selection'], ['Home / End', 'First / last'], ['Space', 'Check or uncheck'], ['Ctrl+A', 'Select all'], ['Enter', 'Import']]],
   ['Trash', [['U', 'Restore', ['restore']]]],
   ['Folders', [['Arrows', 'Walk; Left and Right fold and open'], ['Home / End', 'First / last'], ['Amber dot', 'Only on the working disk'], ['Hollow ring', 'The record drive is away']]],
+  ['People', [['Arrows', 'Move across the wall'], ['Home / End', 'First / last'], ['Enter', 'Their photographs'], ['N', 'Name them'], ['Y', 'Yes, one person (the question at the top)'], ['Esc / G', 'Back to the grid']]],
   ['Teaching', [['Y / N', 'This is / is not the word']]],
 ];
 const TIPS = {
@@ -2405,7 +2420,12 @@ const TIPS = {
   'all-photos': 'All photographs', 'trash-view': 'Trash', 'new-album': 'New album\u2026', 'collapse-stacks': 'Fold or open every stack',
   'crop-reset': 'Remove the crop', 'crop-cancel': 'Leave the crop as it was', 'crop-apply': 'Apply the crop',
   'edit-reset': 'Reset the edit', 'edit-close': 'Close Develop',
-  'import-card': 'Import the card\u2026', 'close-import': 'Close the import panel', 'merge-sweep': 'Merge a preview of the sweep', 'check-new': 'Check only the new photographs',
+  'import-card': 'Import the card\u2026', 'close-import': 'Close the import panel', 'merge-sweep': 'Merge a preview of the sweep',
+  'rank-size-2': 'Two at once', 'rank-size-4': 'Four at once', 'rank-size-6': 'Six at once', 'rank-size-9': 'Nine at once',
+  'rank-size-12': 'Twelve at once', 'rank-size-16': 'Sixteen at once', 'rank-size-20': 'Twenty at once',
+  'rank-mode-learn': 'Learn \u2014 the fastest route to the best ranking: teaches where it is least sure, finds among the leaders',
+  'rank-mode-random': 'Random \u2014 a walk with no opinion', 'rank-mode-diverse': 'Diverse \u2014 spread across the scope\u2019s looks',
+  'rank-mode-tournament': 'Tournament \u2014 the leaders meet', 'check-new': 'Check only the new photographs',
   'check-all': 'Check every photograph', 'check-none': 'Uncheck everything', 'start-import': 'Import the checked photographs', 'stop-import': 'Stop the import',
   'change-home': 'Change where the library lives\u2026', 'close-drive': 'Close', 'close-empty': 'Close', 'close-export': 'Close',
   'synchronize-folder': 'Synchronize this folder with the disk', 'forget-missing': 'Forget the missing photographs\u2026',

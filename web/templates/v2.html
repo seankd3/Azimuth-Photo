@@ -66,9 +66,11 @@
         <div class="section-heading"><button class="eyebrow" type="button">Drives</button></div>
         <div class="drive-list" data-drive-list></div>
       </section>
-      <p class="sidebar-status" data-status><span data-status-word role="status"></span><span data-status-pace aria-hidden="true"></span></p>
-      <p class="said" data-said aria-live="polite"></p>
     </aside>
+    <div class="shell-foot" data-foot>
+      <p class="sidebar-status" data-status><span data-status-word role="status"></span><span data-status-pace aria-hidden="true"></span></p>
+    </div>
+    <p class="said" data-said aria-live="polite"></p>
 
     <main class="workspace">
       <div class="contextbar">
@@ -89,21 +91,21 @@
         <button class="quiet-button" type="button" data-action="save-view" hidden>Save as album…</button>
         <button class="quiet-button" type="button" data-action="keep-results" hidden>Save results…</button>
         <span class="teach-hint" data-teach-hint hidden></span>
-        <span class="rank-progress" data-rank-progress hidden></span>
+        <span class="rank-progress" data-rank-progress role="status" hidden></span>
         <div class="rank-size" data-rank-size hidden role="group" aria-label="How many at once">
-          <button type="button" data-size="2">2</button>
-          <button type="button" data-size="4">4</button>
-          <button type="button" data-size="6">6</button>
-          <button type="button" data-size="9">9</button>
-          <button type="button" data-size="12">12</button>
-          <button type="button" data-size="16">16</button>
-          <button type="button" data-size="20">20</button>
+          <button type="button" data-size="2" data-action="rank-size-2">2</button>
+          <button type="button" data-size="4" data-action="rank-size-4">4</button>
+          <button type="button" data-size="6" data-action="rank-size-6">6</button>
+          <button type="button" data-size="9" data-action="rank-size-9">9</button>
+          <button type="button" data-size="12" data-action="rank-size-12">12</button>
+          <button type="button" data-size="16" data-action="rank-size-16">16</button>
+          <button type="button" data-size="20" data-action="rank-size-20">20</button>
         </div>
         <div class="rank-size" data-rank-mode hidden role="group" aria-label="How the set is drawn">
-          <button type="button" data-mode="learn" title="The fastest route to the best ranking — teaches where it is least sure, finds among the leaders (M cycles)">Learn</button>
-          <button type="button" data-mode="random" title="A walk with no opinion">Random</button>
-          <button type="button" data-mode="diverse" title="Spread across the scope's looks">Diverse</button>
-          <button type="button" data-mode="tournament" title="The leaders meet">Tournament</button>
+          <button type="button" data-mode="learn" data-action="rank-mode-learn">Learn</button>
+          <button type="button" data-mode="random" data-action="rank-mode-random">Random</button>
+          <button type="button" data-mode="diverse" data-action="rank-mode-diverse">Diverse</button>
+          <button type="button" data-mode="tournament" data-action="rank-mode-tournament">Tournament</button>
         </div>
         <button class="quiet-button" type="button" data-action="leave-rank" hidden><kbd>Esc</kbd> Done</button>
         <button class="quiet-button" type="button" data-action="collapse-stacks" aria-pressed="false"></button>
@@ -127,8 +129,8 @@
       <section class="import-stage" data-import-stage aria-label="Photographs to import" hidden></section>
       <section class="rank-stage" data-rank aria-label="Rank" tabindex="-1" hidden></section>
       <section class="face-wall" data-people-stage aria-label="People" tabindex="-1" hidden></section>
-      <section class="loupe-stage" data-loupe aria-label="Photograph preview" tabindex="-1" hidden>
-        <button class="loupe-close" type="button" data-action="close-loupe" data-icon-only="close" aria-label="Close preview"></button>
+      <section class="loupe-stage" data-loupe aria-label="The loupe" tabindex="-1" hidden>
+        <button class="loupe-close" type="button" data-action="close-loupe" data-icon-only="close" aria-label="Close the loupe"></button>
         <img data-loupe-image alt="">
         <p class="loupe-note" data-loupe-note hidden></p>
         <p class="loupe-caption" data-loupe-caption hidden></p>

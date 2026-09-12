@@ -29,6 +29,9 @@ const state = {
   // The merged panorama the loupe stands in for a sweep's frame, once
   // made: {id, url, width, height}; null when the loupe closes.
   merged: null,
+  // The loupe source that was promised and did not load, so the note that
+  // explains a black stage survives the next render.
+  troubled: null,
   scanning: false,
   selected: null,
   selectedIndex: null,

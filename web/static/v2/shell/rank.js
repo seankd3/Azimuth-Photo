@@ -187,6 +187,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
     // each other stay; a smaller set lets its longest-standing cards go, a
     // larger one brings in what is in hand and asks for the rest.
     if (!SIZES[n]) return;
+    say(`${n} at once`);
     state.size = n;
     keep(SIZE_KEY, n);
     if (!isOpen()) { render(); return; }
@@ -226,6 +227,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
 
   async function remode(mode) {
     if (!MODES.includes(mode) || mode === state.mode) return;
+    say(mode[0].toUpperCase() + mode.slice(1));
     state.mode = mode;
     keep(MODE_KEY, mode);
     // The buffer was drawn under the old opinion; a fresh deal says the new one.
@@ -336,7 +338,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
       // The stage moved on; the round did not land. Said plainly — an
       // unrecorded pick that looked recorded would be worse than the pause.
       state.rounds = Math.max(0, state.rounds - 1);
-      notify(`That pick was not recorded — ${error.message}`);
+      notify(why(error, 'That pick'));
     });
     const queued = state.queued;
     state.queued = null;
@@ -578,7 +580,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
   function renderProgress() {
     const app = read();
     const shelf = (app.albums || []).find((c) => c.id === app.album);
-    const place = app.survey ? `the ${app.survey.length} marked`
+    const place = app.survey ? `the ${numbered(app.survey.length, 'marked photograph')}`
       : shelf ? `“${shelf.name.split('/').pop()}”`
         : (app.folders || []).length ? app.folders.map((f) => f.split('/').pop()).join(' + ') : 'your library';
     const narrowed = describe ? describe() : '';
@@ -599,7 +601,9 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
       const card = Math.min(stage.clientWidth / cells[0], stage.clientHeight / cells[1] * 1.5);
       const small = stage.clientWidth > 0 && card < CARD_FLOOR && !on;
       button.disabled = small;
-      button.title = small ? `${n} at once would make each photograph too small to judge here` : '';
+      // The reason replaces the standing tooltip only while it holds.
+      if (!button.dataset.said) button.dataset.said = button.title;
+      button.title = small ? `${n} at once would make each photograph too small to judge here` : button.dataset.said;
     }
     for (const button of document.querySelectorAll('[data-rank-mode] button')) {
       const on = button.dataset.mode === state.mode;

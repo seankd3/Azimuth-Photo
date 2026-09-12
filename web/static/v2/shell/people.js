@@ -87,7 +87,7 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
       row.dataset.settled = entry.settled ? '1' : '0';
       row.title = (!entry.settled
         ? 'Someone the library keeps seeing — click to see them; N or right-click names them'
-        : `${entry.term} — N or right-click renames`) + `. About ${entry.count.toLocaleString()}: the count settles as faces are read`;
+        : `${entry.term} — N or right-click renames`) + `. About ${numbered(entry.count, 'photograph')}: the count settles as faces are read`;
       const name = document.createElement('span');
       name.className = 'leaf';
       name.textContent = entry.term;
@@ -285,7 +285,11 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
       await product.keepApart(pair.a.exemplar, pair.b.exemplar);
       maybe = maybe.filter((m) => m !== pair);
       renderWall(read().people || []);
-      notify(`“${pair.a.term}” and “${pair.b.term}” stay two people.`);
+      // The one No on the wall has the way back every Yes has.
+      undo.show(`“${pair.a.term}” and “${pair.b.term}” stay two people.`, async () => {
+        await product.keepApart(pair.a.exemplar, pair.b.exemplar, false);
+        await renamed();
+      });
     } catch (error) {
       notify(why(error));
     }
