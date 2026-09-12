@@ -436,6 +436,14 @@ def seen(conn) -> dict[str, int]:
     return counts
 
 
+def uncertain(conn) -> dict[str, float]:
+    """Learn's uncertainty when no lane has fitted yet: the fit over the
+    rounds alone (310 ms on 4,308 rounds). The rank lane's own fit, with
+    the vectors, replaces it when it lands."""
+
+    return fitted(rounds(conn))[1]
+
+
 def candidates(conn, n: int = 12, *, scope: Scope = EVERYTHING, avoid=(), unsure: dict[str, float] | None = None,
                mode: str = "close", space=None) -> list[dict]:
     """Photographs worth comparing next.
@@ -522,9 +530,7 @@ def candidates(conn, n: int = 12, *, scope: Scope = EVERYTHING, avoid=(), unsure
 
     n = max(2, int(n))
     if str(mode) == "learn" and unsure is None:
-        # The rank lane hands its fit's own uncertainty in; without a lane
-        # (a test, a script) the fit over the rounds alone says it.
-        unsure = fitted(rounds(conn))[1]
+        unsure = uncertain(conn)
     ordered = _ordered(pool, n, str(mode), space, unsure)
     if ordered:
         # A set wears its anchor's orientation when the scope can dress it:

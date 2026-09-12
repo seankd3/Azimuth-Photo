@@ -80,9 +80,10 @@ def main() -> int:
         print("smoke: the window never answered", file=sys.stderr)
         return 1
     # The first answer with the whole grid drawn, else the last: a slow
-    # machine takes longer to draw, and a fault is a fault whenever caught.
+    # machine takes longer to draw. The page keeps every fault it caught,
+    # so the last answer holds them all.
     answer = next((a for a in answers if a["cells"] == PHOTOS), answers[-1])
-    errors = [text for a in answers for text in a["errors"]]
+    errors = answers[-1]["errors"]
     ok = answer["cells"] == PHOTOS and not errors
     print(f"smoke: {answer['cells']} of {PHOTOS} cells, {answer['count']!r}, errors {errors}")
     print("smoke: the build opens" if ok else "smoke: REFUSED")

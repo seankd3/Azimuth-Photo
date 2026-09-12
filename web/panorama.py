@@ -51,14 +51,14 @@ def run_around(conn, photo_id: int) -> list[dict]:
     folder. The frame alone when none are."""
 
     row = conn.execute(
-        "SELECT id, content_hash AS hash, date_taken, camera_model, width, height, tail"
+        "SELECT id, content_hash AS hash, date_taken, camera_model, width, height, tail, develop"
         " FROM images WHERE id = ?", (int(photo_id),)).fetchone()
     when = _timed(row["date_taken"]) if row else None
     if when is None or not row["hash"]:
         return [dict(row)] if row else []
     reach = dt.timedelta(seconds=SWEEP_GAP * 40)
     rows = [dict(r) for r in conn.execute(
-        "SELECT id, content_hash AS hash, date_taken, camera_model, width, height, tail FROM images"
+        "SELECT id, content_hash AS hash, date_taken, camera_model, width, height, tail, develop FROM images"
         " WHERE tail IS NOT NULL AND vc_of IS NULL AND status != 'trashed' AND content_hash IS NOT NULL"
         " AND date_taken BETWEEN ? AND ? ORDER BY date_taken ASC, id ASC",
         ((when - reach).strftime("%Y-%m-%d %H:%M:%S"), (when + reach).strftime("%Y-%m-%d %H:%M:%S")),
@@ -188,7 +188,14 @@ def of(conn, tiles, photo_id: int) -> dict | None:
     if held is not None and held.get("state") == cache.READY:
         said = json.loads(held["value"]) if held.get("value") else None
         return said if said and int(photo_id) in said["members"] else None
-    tile_of = lambda frame: tiles.path(frame["hash"], render.GRID)  # noqa: E731
+    def tile_of(frame) -> str:
+        # The plain tile; an edited frame's own rendition when that is the
+        # one on disk (its tiles are keyed by the edit).
+        plain = tiles.path(frame["hash"], render.GRID)
+        if os.path.isfile(plain) or not frame.get("develop"):
+            return plain
+        return tiles.path(frame["hash"], render.GRID, json.loads(frame["develop"]))
+
     if not all(os.path.isfile(tile_of(frame)) for frame in frames):
         return None
     verdict = judge(frames, tile_of)

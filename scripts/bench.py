@@ -67,7 +67,7 @@ def main(argv: list[str]) -> int:
     BUDGET = {"photos": 40, "size everything": 30, "size folder": 5, "days everything": 200, "days folder": 10,
               "position": 80, "counts": 30, "stacks.stack": 20, "stacks.unstack": 20, "facets_of": 1500,
               "stacks.project": 1500, "folder_tree": 1500, "search": 200, "rank.candidates": 150,
-              "rank.fitted": 4000, "rank.progress": 150, "work.owed": 10}
+              "rank.uncertain": 4000, "rank.progress": 150, "work.owed": 10}
     over = []
 
     def row(name, fn):
@@ -97,8 +97,8 @@ def main(argv: list[str]) -> int:
     row("search lexical", lambda: finding.search(conn, "2016", limit=200))
     # The fit runs on the rank lane and hands Learn its uncertainty; a Learn
     # draw pays the draw alone. Both timed, each against its own budget.
-    row("rank.fitted (rounds alone)", lambda: rank.fitted(rank.rounds(conn)))
-    unsure = rank.fitted(rank.rounds(conn))[1]
+    row("rank.uncertain (rounds alone)", lambda: rank.uncertain(conn))
+    unsure = rank.uncertain(conn)
     row("rank.candidates learn", lambda: rank.candidates(conn, 9, mode="learn", unsure=unsure))
     row("rank.progress", lambda: rank.progress(conn))
     row("work.owed grid", lambda: work.owed(conn, store.grid, limit=64))

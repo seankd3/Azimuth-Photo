@@ -35,7 +35,8 @@ def bundled_document() -> Path:
     sources: when any file under `web/static/v2/` or the template is newer
     than the built document, it is built again here (half a second), so
     the window always shows the UI the tree says and never the one built
-    last week. A build that fails is a launch that refuses, and says why."""
+    last week. A build that fails is written to the log and the document
+    there is opens; only no document at all refuses the launch."""
 
     if getattr(sys, "frozen", False):
         return Path(sys._MEIPASS) / "desktop" / "index.html"
@@ -51,8 +52,10 @@ def bundled_document() -> Path:
                                capture_output=True, text=True, cwd=root, check=False)
         if built.returncode != 0:
             logging.getLogger("azimuth").error("the desktop document did not build: %s", built.stderr.strip())
-            raise SystemExit("the desktop document did not build; see logs/azimuth.log")
-        mark("document built")
+            if not made.is_file():
+                raise SystemExit("the desktop document did not build; see logs/azimuth.log")
+        else:
+            mark("document built")
     return made
 
 
@@ -344,7 +347,7 @@ class Desktop:
                 except OSError:
                     # After a gc the ref lives in packed-refs alone.
                     packed = (root / ".git" / "packed-refs").read_text(encoding="utf-8").splitlines()
-                    commit = next(line.split()[0] for line in packed if line.endswith(" " + ref))
+                    commit = next((line.split()[0] for line in packed if line.endswith(" " + ref)), "")
             last = (root / ".git" / "logs" / "HEAD").read_text(encoding="utf-8").strip().splitlines()[-1]
             stamp = int(last.split(">", 1)[1].split()[0])
             when = time.strftime("%d %b %Y", time.localtime(stamp))
@@ -706,6 +709,7 @@ def main() -> int:
     if not one_at_a_time():
         return 0
     keep_a_log(home.current())
+    document = bundled_document()   # before the catalog is opened: a refusal leaves nothing half-open
     desktop = Desktop(home.current())
     # The document is opened from its file rather than handed over as a
     # string: a page with a file origin may show a tile straight from the
@@ -713,7 +717,7 @@ def main() -> int:
     # has no origin and every picture would have to cross the bridge encoded.
     window = webview.create_window(
         "Azimuth Photo",
-        url=bundled_document().as_uri(),
+        url=document.as_uri(),
         js_api=desktop,
         width=1500,
         height=950,

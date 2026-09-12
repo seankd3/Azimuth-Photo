@@ -776,6 +776,13 @@ finding was checked and the numbers said no.
 | X156 | `sim_learn`'s fisher lane was a second copy of the shipped mode with two different tie-breaks; the E4 numbers are the learn lane's, which calls the shipped mode | the fisher lane deleted; `choose_band`'s comment says what it sorts by | shipped |
 | X157 | An idle lane stepped every five seconds, and an idle step on a caught-up catalog walks every living row per kind (100 ms at 8k on the owner's copy, seconds at 150k): a core spent on nothing, per lane, forever (found by this session's bench while the refuter ran) | an idle lane sleeps until nudged -- a sweep, a look, an import, a drive coming or going (the follower nudges now) -- with a sixty-second clock as the safety net | shipped |
 | X158 | The grid spec still held the last-row rule of 08-19 (never taller than the size) after F1 (09-09) made a short last row fill the width; the node spec had failed since, and the full check with it, unnoticed because only the Python suite was run (found by running `azimuth-check` whole) | the spec holds the shipped rule: a short last row stretches to the width within 1.6x the size and never past it; the whole check passes end to end | shipped |
+| X159 | The smoke printed each fault once per probe: six copies of one fault | the last answer holds every fault the page kept; it is read once | shipped |
+| X160 | A failed build refused the launch silently under pythonw, after the catalog was already open, even when yesterday's good document was there (node_modules gone) | the build runs before anything is opened; a failed build is logged and the document there is opens; only no document at all refuses | shipped |
+| X161 | `version()` let StopIteration out when a ref was neither loose nor packed | no build to name is an empty answer, and the foot stays empty | shipped |
+| X162 | Two builds at once (the window and a proof) shared one temp bundle name and could refuse each other | the bundle is named per process | shipped |
+| X163 | The sweep's tile guard named the plain tile; a run with an edited frame (tiles keyed by the edit) was never judged and never kept, walked on every inspector open | the frame's own rendition is looked at when the plain tile is not there | shipped |
+| X164 | "Learn's uncertainty before a lane's fit" lived twice: in `rank.candidates` and in `Library.rank` | one home, `rank.uncertain(conn)`; the library keeps its answer, the bench and the scripts call it | shipped |
+| X165 | Two owed-work sources do not nudge an idle lane (a model's weights arriving out of band; `set_date`'s forget, which re-reads at once anyway) | named; the sixty-second clock covers them | held |
 
 ## Refutation of D1-D5, PF4, PF5, E2-3 (2026-09-12, by a second model)
 

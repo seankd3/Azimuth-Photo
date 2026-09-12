@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -58,7 +59,8 @@ def main() -> int:
         print("the web fonts are missing. Run npm ci before building the desktop UI.", file=sys.stderr)
         return 2
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    bundle = OUTPUT.with_suffix(".js")
+    # Named per process: the window and a proof may both build at once.
+    bundle = OUTPUT.with_suffix(f".{os.getpid()}.js")
     # Output captured and no console: the window builds its own document
     # at launch (desktop.bundled_document), and a console child of a
     # windowless process would flash a black window on the desktop.

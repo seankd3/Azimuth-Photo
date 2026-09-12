@@ -1182,10 +1182,8 @@ class Library:
         self._open()
         scope = self.ranking(view)
         if str(mode) == "learn" and self._owner is not None and self._owner._unsure is None:
-            # Before the lane's first fit (it follows the first sweep, minutes
-            # on a slow disk): the fit over the rounds alone, once, kept until
-            # the lane's own replaces it. Without it Learn dealt the leaders.
-            self._owner._unsure = rank.fitted(rank.rounds(self.conn))[1]
+            # Kept once made, until the lane's own fit replaces it.
+            self._owner._unsure = rank.uncertain(self.conn)
         chosen = rank.candidates(self.conn, n, scope=all_of(scope, self.tiles.ready),
                                  avoid=avoid, mode=mode, space=space,
                                  unsure=self._owner._unsure if self._owner is not None else None)
