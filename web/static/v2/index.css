@@ -813,7 +813,8 @@ button kbd { color: var(--text-3); font: var(--t-label)/1 var(--mono); }
 }
 .loupe-hint kbd { margin: 0 2px 0 8px; padding: 1px 6px; border: 1px solid var(--line-strong); border-radius: 3px; color: var(--text); font: var(--t-label)/1.5 var(--mono); }
 .loupe-hint kbd:first-child { margin-left: 0; }
-.loupe-stage.is-full .loupe-hint { display: none; }
+/* the clean room keeps the lesson: F from the grid and a look from Rank open straight into it, and a lesson counted must be a lesson shown */
+.loupe-stage.is-full .loupe-hint { bottom: 14px; }
 .inspector-heading .eyebrow { margin-left: 0; }
 .inspector-heading h2 { margin: 0; overflow-wrap: anywhere; font-size: var(--t-title); line-height: 1.35; }
 .facts { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 10px 12px; margin-top: 26px; font-size: var(--t-meta); }
