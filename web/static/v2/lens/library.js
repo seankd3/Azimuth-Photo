@@ -8,7 +8,7 @@ import {
   visibleGridRange,
 } from '../kit/virtual-grid.js';
 import { registerLens } from '../store/index.js';
-import { count } from '../kit/words.js';
+import { numbered } from '../kit/words.js';
 
 // The layout is a pure function of the width, the row height, and every
 // photograph's shape. Shapes arrive with the rows (width and height from the
@@ -19,7 +19,7 @@ import { count } from '../kit/words.js';
 // above changing height does not move what the person is looking at.
 let aspects = new Float32Array(0);
 let aspectsVersion = 0;
-let layout = null;
+let lastLayout = null;
 let layoutKey = '';
 let breaks = null;
 let breaksFrom = null;
@@ -70,10 +70,10 @@ function collectBreaks(state) {
 function currentLayout(width, rowHeight, count) {
   const key = `${width}:${rowHeight}:${count}:${aspectsVersion}:${breaksVersion}`;
   if (key !== layoutKey) {
-    layout = measureGrid(width, rowHeight, aspects, count, { breaks });
+    lastLayout = measureGrid(width, rowHeight, aspects, count, { breaks });
     layoutKey = key;
   }
-  return layout;
+  return lastLayout;
 }
 
 // A cell's picture is a file the browser reads itself. The row says whether
@@ -187,11 +187,11 @@ function photoCell(photo, index, actions) {
 }
 
 function positionCell(cell, layout, index, photo) {
-  const place = placeGridCell(layout, index);
-  cell.style.left = `${place.left}px`;
-  cell.style.top = `${place.top}px`;
-  cell.style.width = `${place.width}px`;
-  cell.style.height = `${place.height}px`;
+  const spot = placeGridCell(layout, index);
+  cell.style.left = `${spot.left}px`;
+  cell.style.top = `${spot.top}px`;
+  cell.style.width = `${spot.width}px`;
+  cell.style.height = `${spot.height}px`;
   const turn = photo?.rotate || 0;
   cell.dataset.turn = turn;
   const image = cell.querySelector('img');
@@ -200,10 +200,10 @@ function positionCell(cell, layout, index, photo) {
   // rotated about its centre, so the tile is shown sideways without a second
   // tile ever being made.
   if (turn === 90 || turn === 270) {
-    image.style.width = `${place.height}px`;
-    image.style.height = `${place.width}px`;
-    image.style.left = `${(place.width - place.height) / 2}px`;
-    image.style.top = `${(place.height - place.width) / 2}px`;
+    image.style.width = `${spot.height}px`;
+    image.style.height = `${spot.width}px`;
+    image.style.left = `${(spot.width - spot.height) / 2}px`;
+    image.style.top = `${(spot.height - spot.width) / 2}px`;
   } else {
     image.style.width = '';
     image.style.height = '';
@@ -245,7 +245,7 @@ function reconcileGrid(grid, state, actions, layout, range) {
       cell.dataset.missing = photo.placed ? '0' : '1';
       const { state: where, said } = presence(photo, cell.dataset.empty === '');
       const why = where === 'here' ? '' : `, ${said.replace(/[.…]$/, '')}`;
-      const stars = photo.stars > 0 ? `, ${count(photo.stars, 'star')}` : '';
+      const stars = photo.stars > 0 ? `, ${numbered(photo.stars, 'star')}` : '';
       const stacked = photo.stack ? `, a stack of ${photo.stack + 1}` : '';
       cell.setAttribute('aria-label', `${picked ? 'Picked, ' : ''}${photo.tail || `Photo ${photo.id}`}${stars}${stacked}${why}`);
       cell.setAttribute('aria-pressed', String(Boolean(state.marked?.has(photo.id))));
@@ -302,11 +302,11 @@ function reconcileGrid(grid, state, actions, layout, range) {
     const photo = state.photos.get(index);
     const cover = photo && (photo.stack_of || (photo.stack ? photo.id : null));
     if (!cover) continue;
-    const place = placeGridCell(layout, index);
-    const key = `${cover}:${place.top}`;
-    const held = segments.get(key) || { left: place.left, right: place.left + place.width, top: place.top, height: place.height };
-    held.left = Math.min(held.left, place.left);
-    held.right = Math.max(held.right, place.left + place.width);
+    const spot = placeGridCell(layout, index);
+    const key = `${cover}:${spot.top}`;
+    const held = segments.get(key) || { left: spot.left, right: spot.left + spot.width, top: spot.top, height: spot.height };
+    held.left = Math.min(held.left, spot.left);
+    held.right = Math.max(held.right, spot.left + spot.width);
     segments.set(key, held);
   }
   const currentSegments = new Map([...grid.children].filter((n) => n.dataset.segment !== undefined).map((n) => [n.dataset.segment, n]));
@@ -360,14 +360,14 @@ function renderGrid(grid, state, actions) {
   const count = state.total || 18;
   collectAspects(state);
   collectBreaks(state);
-  const before = layout;
+  const before = lastLayout;
   const anchor = before && before.count === count && actions.scrollTop > 0
     ? anchorOf(before, actions.scrollTop)
     : null;
   const layoutNow = currentLayout(grid.clientWidth, actions.rowHeight, count);
   let scrollTop = actions.scrollTop;
   if (anchor && layoutNow !== before) {
-    // Keep the first visible cell where it was on screen across the re-layout.
+    // Keep the first visible cell where it was on screen across the re-lastLayout.
     scrollTop = Math.max(0, placeGridCell(layoutNow, anchor.index).top - anchor.offset);
     if (Math.abs(scrollTop - actions.scrollTop) >= 1) actions.scrollTo(scrollTop);
   }
@@ -391,16 +391,16 @@ function anchorOf(current, scrollTop) {
 // What the shell needs from the geometry without owning it: where a cell is,
 // and which cell an arrow key means.
 function place(index) {
-  return layout && index < layout.count ? placeGridCell(layout, index) : null;
+  return lastLayout && index < lastLayout.count ? placeGridCell(lastLayout, index) : null;
 }
 
 function neighbour(index, direction) {
-  return layout ? verticalNeighbour(layout, index, direction) : null;
+  return lastLayout ? verticalNeighbour(lastLayout, index, direction) : null;
 }
 
 // The first cell under a scroll position — what the timeline's marker rides.
 function indexAt(scrollTop) {
-  return layout && layout.count ? anchorOf(layout, scrollTop).index : null;
+  return lastLayout && lastLayout.count ? anchorOf(lastLayout, scrollTop).index : null;
 }
 
 // What the selection is, said in facts. One photograph: its own. Several:
@@ -436,7 +436,7 @@ function renderInspector(panel, selected, actions = {}) {
     const tally = { picked: 0, trashed: 0, unflagged: 0 };
     for (const p of rows) tally[p.status in tally ? p.status : 'unflagged'] += 1;
     const heading = element('div', 'inspector-heading');
-    heading.append(element('p', 'eyebrow', 'Selection'), element('h2', '', count(marked.size, 'photograph')));
+    heading.append(element('p', 'eyebrow', 'Selection'), element('h2', '', numbered(marked.size, 'photograph')));
     const facts = element('dl', 'facts');
     const said = [
       ['Loaded', rows.length < marked.size ? `${rows.length.toLocaleString()} of them on hand` : ''],
@@ -456,7 +456,7 @@ function renderInspector(panel, selected, actions = {}) {
     const drives = actions.drives || [];
     const glance = element('div', 'glance');
     const heading = element('div', 'inspector-heading');
-    heading.append(element('p', 'eyebrow', 'Library'), element('h2', '', count(counts.photos || 0, 'photograph')));
+    heading.append(element('p', 'eyebrow', 'Library'), element('h2', '', numbered(counts.photos || 0, 'photograph')));
     const facts = element('dl', 'facts');
     // A zero is an answer: None and Empty are said, not left out. The
     // worker is an event, not a fact, so it appears only while it works.
@@ -484,7 +484,7 @@ function renderInspector(panel, selected, actions = {}) {
   const rounds = selected.rounds ?? null;
   const elo = Math.round(selected.elo || 1200);
   const score = rounds === null && elo === 1200 ? ''
-    : rounds ? `${elo.toLocaleString()} · ${count(rounds, 'round')}`
+    : rounds ? `${elo.toLocaleString()} · ${numbered(rounds, 'round')}`
       : elo !== 1200 ? `${elo.toLocaleString()} · predicted`
         : 'Not ranked yet';
   // What the develop recipe holds: a crop, adjustments, or both.
@@ -503,7 +503,7 @@ function renderInspector(panel, selected, actions = {}) {
     selected.iso && `ISO ${selected.iso}`,
     selected.focal_length && `${Math.round(selected.focal_length)}mm`,
   ].filter(Boolean).join(' · ');
-  const place = selected.lat !== undefined && selected.lon !== undefined
+  const where = selected.lat !== undefined && selected.lon !== undefined
     ? `${Math.abs(selected.lat).toFixed(4)}° ${selected.lat >= 0 ? 'N' : 'S'}, ${Math.abs(selected.lon).toFixed(4)}° ${selected.lon >= 0 ? 'E' : 'W'}` : '';
   const stars = selected.stars ? `${'★'.repeat(selected.stars)} · ` : '';
   // A photograph at a drive's root has a folder too: the root.
@@ -523,7 +523,7 @@ function renderInspector(panel, selected, actions = {}) {
     ['Taken', selected.date_taken || unknown],
     ['Exposure', exposure || unknown],
     ['Camera', [selected.camera_make, selected.camera_model].filter(Boolean).join(' ') || unknown, { chip: selected.camera_model && { is: 'camera', values: [selected.camera_model] } }],
-    ['Place', place],
+    ['Place', where],
     ['Lens', selected.lens || unknown],
     ['Sharpness', sharpnessSaid(selected.sharp), { said: true }],
     ['Eyes', { open: 'Open', closed: 'Closed', unsure: 'Cannot tell' }[selected.sharp?.eyes] || '', { said: true }],

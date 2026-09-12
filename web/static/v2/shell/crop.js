@@ -63,9 +63,9 @@ export function createCropSurface({ product, notify, undo, applied }) {
     }
     const id = state.photo.id;
     const keys = ['CropLeft', 'CropTop', 'CropRight', 'CropBottom'];
-    const box = state.unit.map((v) => Math.round(v * 1e6) / 1e6);
-    const patch = Object.fromEntries(keys.map((key, i) => [key, whole ? null : box[i]]));
-    const before = Object.fromEntries(keys.map((key, i) => [key, state.had ? state.had[i] : null]));
+    const unit = state.unit.map((v) => Math.round(v * 1e6) / 1e6);
+    const patch = Object.fromEntries(keys.map((name, i) => [name, whole ? null : unit[i]]));
+    const before = Object.fromEntries(keys.map((name, i) => [name, state.had ? state.had[i] : null]));
     try {
       await product.develop(id, patch);
     } catch (error) {

@@ -128,6 +128,8 @@ finding was checked and the numbers said no.
 |---|---|---|---|
 | D1 | Too many documents; it is not clear which are current, accurate, or slop (owner's ask, 2026-09-09) | read every one; keep only those that own a durable fact the code cannot say, and are true at HEAD; fold or delete the rest | shipped: 9 deleted, 12 archived with dated banners, 1 folded, 14 fixed; the paths gate now reads the four docs a contributor reads |
 | D2 | An empty library offered Filter, Sort, Size and Rank over nothing | the bar keeps its height and loses its controls until the first photographs arrive; the one thing on screen is the way to add them (proven on an empty home and a full one) | shipped |
+| D3 | A local named like an imported helper silently shadowed it (`count`) and killed every view for an hour; fourteen other locals shadowed outer names without harm | the linter refuses a shadowed name (`no-shadow`); the kit helper is `numbered`; every shadow renamed | shipped |
+| E2-3 | The sharpness pass failed on real faces ("unknown C++ exception from OpenCV"): the BGR frame handed to the landmark model was a reversed-stride view | contiguous; failed rows are dropped at repair and re-owed; six of Sean's faces now measure (eyes open, per-face sharpness) | shipped |
 
 ## Search box and drop (second round, 2026-09-09)
 

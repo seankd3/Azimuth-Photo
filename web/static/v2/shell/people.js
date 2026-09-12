@@ -13,7 +13,7 @@ import { why } from '../kit/why.js';
 import { columnsOf } from '../kit/days.js';
 import { emptyState } from '../lens/library.js';
 import { icon } from '../kit/icons.js';
-import { count } from '../kit/words.js';
+import { numbered } from '../kit/words.js';
 
 export function createPeoplePanel({ product, read, update, notify, undo, browse, renamed, ask }) {
   const section = document.querySelector('[data-people-section]');
@@ -91,10 +91,10 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
       const name = document.createElement('span');
       name.className = 'leaf';
       name.textContent = entry.term;
-      const count = document.createElement('span');
-      count.className = 'set-count';
-      count.textContent = `~${entry.count.toLocaleString()}`;
-      row.append(face(entry, 'person-face'), name, count);
+      const tally = document.createElement('span');
+      tally.className = 'set-count';
+      tally.textContent = `~${entry.count.toLocaleString()}`;
+      row.append(face(entry, 'person-face'), name, tally);
       return row;
     });
     // The wall's door: the rest of the Someones live there, and so does
@@ -107,7 +107,7 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
     leaf.className = 'leaf';
     leaf.textContent = left > 0
       ? `Introduce ${left} more…`
-      : `All ${count(held.length, 'person', 'people')}…`;
+      : `All ${numbered(held.length, 'person', 'people')}…`;
     door.append(icon('person'), leaf);
     door.addEventListener('click', () => update({ view: 'people', selected: null, selectedIndex: null }));
     rows.push(door);
@@ -194,7 +194,7 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
       look.type = 'button';
       look.className = 'face-card-look';
       look.title = `See ${entry.term}'s photographs`;
-      look.setAttribute('aria-label', `${entry.term}, about ${count(entry.count, 'photograph')} — see them`);
+      look.setAttribute('aria-label', `${entry.term}, about ${numbered(entry.count, 'photograph')} — see them`);
       look.tabIndex = index === cursor ? 0 : -1;
       look.addEventListener('focus', () => { cursor = index; markWall(false); });
       look.append(face(entry, 'face-card-face'));
@@ -204,7 +204,7 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
       name.textContent = entry.term;
       const tally = document.createElement('p');
       tally.className = 'face-card-count';
-      tally.textContent = `~${count(entry.count, 'photograph')}`;
+      tally.textContent = `~${numbered(entry.count, 'photograph')}`;
       const call = document.createElement('button');
       call.type = 'button';
       call.className = 'quiet-button face-card-name-button';

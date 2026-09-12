@@ -16,6 +16,9 @@ export default [
       "no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrorsIgnorePattern: "^_" }],
       "no-undef": "error",
       "no-redeclare": "error",
+      // A local that shadows an import once hid a kit helper behind a string
+      // and killed every view; the linter refuses it now.
+      "no-shadow": "error",
     },
   },
   {

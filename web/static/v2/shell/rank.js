@@ -24,7 +24,7 @@ const ASPECT_MAX = 2.6;
 import { why } from '../kit/why.js';
 import { emptyState } from '../lens/library.js';
 import { recall, remember as keep } from '../kit/remembered.js';
-import { count } from '../kit/words.js';
+import { numbered } from '../kit/words.js';
 
 export function createRankWorkflow({ product, read, update, notify, undo, cull, onLeave, onLook, viewOf, describe, say = () => {} }) {
   const stage = document.querySelector('[data-rank]');
@@ -536,8 +536,8 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
     state.order = state.rows.flat();
     state.order.forEach((setIndex, k) => {
       const number = k + 1;
-      const key = cards.find((card) => Number(card.dataset.index) === setIndex)?.querySelector('kbd');
-      if (key) key.textContent = number === 10 ? '0' : number === 11 ? '-' : number === 12 ? '=' : String(number);
+      const kbd = cards.find((card) => Number(card.dataset.index) === setIndex)?.querySelector('kbd');
+      if (kbd) kbd.textContent = number === 10 ? '0' : number === 11 ? '-' : number === 12 ? '=' : String(number);
     });
     for (const row of rows) {
       let x = (parseFloat(style.paddingLeft) || 0) + (width - row.width) / 2;
@@ -587,7 +587,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
     const ranked = state.total
       ? `${state.earned.toLocaleString()} sorted · ${state.judged.toLocaleString()} seen of ${state.total.toLocaleString()} in ${where}`
       : '';
-    const sitting = state.rounds ? ` · ${count(state.rounds, 'round')} this sitting` : '';
+    const sitting = state.rounds ? ` · ${numbered(state.rounds, 'round')} this sitting` : '';
     const label = document.querySelector('[data-rank-progress]');
     if (label) label.textContent = ranked + sitting;
     for (const button of document.querySelectorAll('[data-rank-size] button')) {

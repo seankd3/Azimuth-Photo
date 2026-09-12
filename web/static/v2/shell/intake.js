@@ -12,7 +12,7 @@
 import { why } from '../kit/why.js';
 import { recall, remember } from '../kit/remembered.js';
 import { title as dayName } from '../kit/days.js';
-import { count } from '../kit/words.js';
+import { numbered } from '../kit/words.js';
 
 export function createIntakeWorkflow({ product, notify, afterImport, progressed = () => {}, enter, leave, isShown, offer = () => {} }) {
   const title = document.querySelector('[data-import-title]');
@@ -71,7 +71,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
       try {
         const held = await product.intakeStatus();
         if (held.phase === 'staging' && held.seen) {
-          progressed(`Looking at ${source} — ${count(held.seen, 'photograph')}…`);
+          progressed(`Looking at ${source} — ${numbered(held.seen, 'photograph')}…`);
         }
       } catch { /* the count is a courtesy; the stage call itself reports */ }
     }, 600);
@@ -97,7 +97,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     state.running = false;
     state.checked = new Set(staged.candidates.filter((c) => !c.suspect).map((c) => c.key));
     title.textContent = isCard ? 'Import from card' : 'Import folder';
-    sourceLine.textContent = `${staged.source} — ${count(staged.candidates.length, 'photograph')}` +
+    sourceLine.textContent = `${staged.source} — ${numbered(staged.candidates.length, 'photograph')}` +
       (staged.receiving ? `, into ${staged.receiving}` : '');
     // Remembered per kind of source: a Move learned on a card must never
     // reach a folder on the working disk.
@@ -175,24 +175,24 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
       box.type = 'checkbox';
       box.dataset.day = day;
       dayBoxes.set(day, box);
-      const title = document.createElement('span');
-      title.textContent = dayTitle(day);
-      const count = document.createElement('span');
-      count.className = 'stage-day-count';
-      count.textContent = members.length.toLocaleString();
-      head.append(box, title, count);
+      const caption = document.createElement('span');
+      caption.textContent = dayTitle(day);
+      const tally = document.createElement('span');
+      tally.className = 'stage-day-tally';
+      tally.textContent = members.length.toLocaleString();
+      head.append(box, caption, tally);
       rows.push(head);
       for (const candidate of members) {
         order.push(candidate.key);
         const cell = document.createElement('label');
         cell.className = 'stage-cell' + (candidate.suspect ? ' is-suspect' : '') + (state.checked.has(candidate.key) ? ' is-checked' : '');
         cell.dataset.key = candidate.key;
-        const box = document.createElement('input');
-        box.type = 'checkbox';
-        box.checked = state.checked.has(candidate.key);
-        box.dataset.key = candidate.key;
+        const check = document.createElement('input');
+        check.type = 'checkbox';
+        check.checked = state.checked.has(candidate.key);
+        check.dataset.key = candidate.key;
         // The stage is one tab stop; the arrows and Space walk its cells.
-        box.tabIndex = -1;
+        check.tabIndex = -1;
         const image = document.createElement('img');
         image.alt = '';
         image.dataset.key = candidate.key;
@@ -203,9 +203,9 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
         const when = document.createElement('span');
         when.className = 'stage-when';
         when.textContent = (candidate.taken || '').slice(0, 16) + (candidate.suspect ? ' · same name and size as one in the library' : '');
-        cell.append(box, image, name, when);
+        cell.append(check, image, name, when);
         rows.push(cell);
-        cells.set(candidate.key, { cell, box });
+        cells.set(candidate.key, { cell, box: check });
         if (state.checked.has(candidate.key)) wornChecked.add(candidate.key);
       }
     }
@@ -283,14 +283,14 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     // The stage's own day rows are the picker; the panel says the span.
     const dated = [...byDay.keys()].filter(Boolean).sort();
     destinations.textContent = dated.length
-      ? `${count(dated.length, 'day')} · ${dayTitle(dated[0])}${dated.length > 1 ? ` – ${dayTitle(dated.at(-1))}` : ''}`
+      ? `${numbered(dated.length, 'day')} · ${dayTitle(dated[0])}${dated.length > 1 ? ` – ${dayTitle(dated.at(-1))}` : ''}`
       : '';
     // The destination said once, as the rule it is — every row repeating
     // the root was noise wearing a path.
     document.querySelector('[data-import-into]').textContent =
       state.kind ? `into ${state.roots[state.kind]}, by date` : 'Choose what these are first.';
     const skipped = state.candidates.length - state.checked.size;
-    summary.textContent = `${count(state.checked.size, 'photograph')} (${(bytes / 1e9).toFixed(2)} GB)` +
+    summary.textContent = `${numbered(state.checked.size, 'photograph')} (${(bytes / 1e9).toFixed(2)} GB)` +
       (skipped ? ` · ${skipped.toLocaleString()} left out` : '');
     startButton.disabled = !state.kind || state.checked.size === 0 || state.running;
   }

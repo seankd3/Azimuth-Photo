@@ -9,7 +9,7 @@ import { acceptDrops } from '../kit/drop.js';
 import { why } from '../kit/why.js';
 import { showMenu, hideMenu } from '../kit/menu.js';
 import { icon } from '../kit/icons.js';
-import { count } from '../kit/words.js';
+import { numbered } from '../kit/words.js';
 
 export function createAlbumsPanel({ product, read, update, notify, undo, reload, moved, selection, describe, viewOf }) {
   const tree = document.querySelector('[data-albums-tree]');
@@ -207,7 +207,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
       await refresh();
       notify(answered.total > kept.kept
         ? `“${name}” keeps the top ${kept.kept.toLocaleString()} of ${answered.total.toLocaleString()} results.`
-        : `“${name}” keeps ${count(kept.kept, 'photograph')} from this search.`);
+        : `“${name}” keeps ${numbered(kept.kept, 'photograph')} from this search.`);
     } catch (error) {
       notify(why(error));
     }
@@ -215,13 +215,13 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
 
   async function quickToss(ids) {
     try {
-      const moved = await product.quick(ids);
+      const quick = await product.quick(ids);
       await refresh();
       if (read().album === 'quick') await reload();
-      const word = (n) => count(n, 'photograph');
-      notify('added' in moved
-        ? `${word(moved.added)} added to Quick album — ${moved.count.toLocaleString()} there now.`
-        : `${word(moved.removed)} out of Quick album — ${moved.count.toLocaleString()} there now.`);
+      const word = (n) => numbered(n, 'photograph');
+      notify('added' in quick
+        ? `${word(quick.added)} added to Quick album — ${quick.count.toLocaleString()} there now.`
+        : `${word(quick.removed)} out of Quick album — ${quick.count.toLocaleString()} there now.`);
     } catch (error) {
       notify(why(error));
     }
@@ -240,7 +240,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
       const out = await product.removeFromAlbum(here.id, ids);
       await refresh();
       await reload();
-      const word = count(out.removed, 'photograph');
+      const word = numbered(out.removed, 'photograph');
       notify(here.smart
         ? `${word} excluded from “${here.name}”.`
         : `${word} out of “${here.name}”.`);
@@ -256,7 +256,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
       const name = (read().albums.find((c) => c.id === id) || {}).name || 'the album';
       // A drop into the wrong album has the same way back as every other
       // change to a set.
-      undo.show(`${count(added.added, 'photograph')} added to “${name}”.`, async () => {
+      undo.show(`${numbered(added.added, 'photograph')} added to “${name}”.`, async () => {
         await product.removeFromAlbum(id, ids);
         await refresh();
         if (read().album === id) await reload();
@@ -307,7 +307,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
         const name = await prompt('Rename to', row || tree, current, { not: albumNames().filter((n) => n !== current) });
         if (name) {
           const renamed = await product.renameAlbum(id, name);
-          notify(`“${current}” renamed to “${name}”.${renamed?.followed ? ` ${count(renamed.followed, 'album')} under it followed.` : ''}`);
+          notify(`“${current}” renamed to “${name}”.${renamed?.followed ? ` ${numbered(renamed.followed, 'album')} under it followed.` : ''}`);
         }
       }
       if (action === 'freeze-album') {

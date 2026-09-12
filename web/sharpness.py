@@ -187,7 +187,9 @@ def measure(path: str, boxes=()) -> dict:
                 continue
             crop = np.asarray(image.crop((left, top, right, bottom)).convert("L"), dtype=np.float32)
             if frame_bgr is None:
-                frame_bgr = np.asarray(image.convert("RGB"))[:, :, ::-1]
+                # Contiguous, or OpenCV inside the landmark model throws on the
+                # reversed channel stride (an unknown C++ exception, on real faces).
+                frame_bgr = np.ascontiguousarray(np.asarray(image.convert("RGB"))[:, :, ::-1])
             eyes = _eyes(image, frame_bgr, left, top, right, bottom)
             faces.append({"q": _zhu_milanfar(crop), "px": min(right - left, bottom - top), "box": box, "eyes": eyes})
     amount = _mlv_map(grey)
@@ -261,7 +263,12 @@ def tidy(conn) -> int:
     """The rows of a measure no longer asked for, gone: never evicted and
     never read, they would sit in the catalog for good."""
 
-    return conn.execute("DELETE FROM cache WHERE kind = 'sharpness' AND recipe != ?", (RECIPE,)).rowcount
+    gone = conn.execute("DELETE FROM cache WHERE kind = 'sharpness' AND recipe != ?", (RECIPE,)).rowcount
+    # A failed row is re-owed: the measure that failed on a real face (a
+    # non-contiguous frame handed to the landmark model) is fixed, and a
+    # failure is never a fact worth keeping about a photograph.
+    gone += conn.execute("DELETE FROM cache WHERE kind = 'sharpness' AND state = 'failed'").rowcount
+    return gone
 
 
 def of(conn, digest: str) -> dict | None:

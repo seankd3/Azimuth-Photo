@@ -20,7 +20,7 @@ function element(tag, className, text = '') {
 const chaptersOf = (state) => chaptersIn(state.days, state.sort, state.total);
 const named = (day) => title(day, { weekday: false });
 
-export function createTimeline({ workspace, before, top, place, indexAt, scrollTo }) {
+export function createTimeline({ workspace, before, top: above, place, indexAt, scrollTo }) {
   const rail = element('div', 'timeline');
   rail.hidden = true;
   const track = element('div', 'timeline-track');
@@ -92,12 +92,12 @@ export function createTimeline({ workspace, before, top, place, indexAt, scrollT
         // The year's word stands where its first month would have; a year
         // that finds no room here is named at its next chapter with room.
         year = thisYear;
-        const at = Math.max(6, top);
+        const laid = Math.max(6, top);
         const mark = element('div', 'timeline-year', year);
-        mark.style.top = `${at}px`;
+        mark.style.top = `${laid}px`;
         track.append(mark);
-        lastWordY = at;
-        lastTickY = at;
+        lastWordY = laid;
+        lastTickY = laid;
         lastYearDrawn = year;
         month = thisMonth;
         continue;
@@ -185,7 +185,7 @@ export function createTimeline({ workspace, before, top, place, indexAt, scrollT
       built = '';
       return;
     }
-    height = Math.max(0, workspace.clientHeight - top);
+    height = Math.max(0, workspace.clientHeight - above);
     const key = `${state.sort}:${state.total}:${state.days.length}:${height}`;
     if (key !== built) {
       built = key;

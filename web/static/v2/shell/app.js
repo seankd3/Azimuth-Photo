@@ -21,7 +21,7 @@ import { recall, remember } from '../kit/remembered.js';
 import { presence } from '../kit/presence.js';
 import { icon } from '../kit/icons.js';
 import { createTimeline } from './timeline.js';
-import { count } from '../kit/words.js';
+import { numbered } from '../kit/words.js';
 
 // A page is at least a viewport at the densest setting, so a 4K window
 // does not straddle three pages on every scroll frame; never past what the
@@ -302,7 +302,7 @@ async function teach(word, yes) {
     // refresh right behind it is authoritative: an excluded photograph
     // leaves the word's view as the key lands, not on the lane's rhythm.
     await product.teach(word, ids, yes);
-    const n = ids.length === 1 ? 'This photograph' : count(ids.length, 'photograph');
+    const n = ids.length === 1 ? 'This photograph' : numbered(ids.length, 'photograph');
     notify(yes ? `${n} taught as “${word}”.` : `${n} taught as not “${word}”.`);
     void labelsPanel.refresh();
     await refreshInPlace();
@@ -696,7 +696,7 @@ function visibleGrid() {
         // The ghost says how many ride along, not just the cell under the cursor.
         const badge = document.createElement('div');
         badge.className = 'drag-badge';
-        badge.textContent = count(ids.length, 'photograph');
+        badge.textContent = numbered(ids.length, 'photograph');
         document.body.append(badge);
         event.dataTransfer.setDragImage(badge, 18, 18);
         requestAnimationFrame(() => badge.remove());
@@ -816,18 +816,18 @@ async function loadView() {
   anchorIndex = null;
   try {
     const { sort, view, query } = read();
-    const looking = viewOf();
-    const key = JSON.stringify(looking);
+    const watched = viewOf();
+    const key = JSON.stringify(watched);
     const [counts, drives, trashCount, size, page] = await Promise.all([
       product.counts(),
       product.drives(),
       product.trashCount(),
-      view === 'trash' || seeking() ? Promise.resolve(0) : product.size(looking),
+      view === 'trash' || seeking() ? Promise.resolve(0) : product.size(watched),
       view === 'trash'
         ? product.trashPhotos({ limit: PAGE, offset: 0 })
         : seeking()
-          ? product.find({ ...asked(), limit: PAGE, offset: 0, view: looking })
-          : product.photos({ sort, limit: PAGE, offset: 0, view: looking }),
+          ? product.find({ ...asked(), limit: PAGE, offset: 0, view: watched })
+          : product.photos({ sort, limit: PAGE, offset: 0, view: watched }),
     ]);
     if (!pages.isCurrent(requestGeneration) || read().view !== view
         || JSON.stringify(viewOf()) !== key || read().query !== query) return;
@@ -838,7 +838,7 @@ async function loadView() {
     // The chapters arrive behind the paint: the first page is on screen in
     // milliseconds, the day headers join when their counts land.
     if (view === 'library' && (sort === 'newest' || sort === 'oldest') && !found) {
-      product.days(looking).then((days) => {
+      product.days(watched).then((days) => {
         if (pages.isCurrent(requestGeneration) && JSON.stringify(viewOf()) === key) update({ days });
       }).catch(() => {});
     } else if (read().days.length) {
@@ -893,7 +893,7 @@ async function refreshInPlace({ shelves = true, count = shelves } = {}) {
 let cardSaid = '';
 const COMES_BACK = (n) => (n === 1
   ? 'Forgotten. It comes back, with its decisions, if the file ever does.'
-  : `${count(n, 'missing photograph')} forgotten. They come back, with their decisions, if the files ever do.`);
+  : `${numbered(n, 'missing photograph')} forgotten. They come back, with their decisions, if the files ever do.`);
 const SAYING = { finding: 'Finding your photographs…' };
 const WORKING = {
   identity: 'Identifying photographs',
@@ -995,7 +995,7 @@ function openExportDialog() {
   exportDialog.querySelector('[data-quality-value]').textContent = quality.value;
   exportDialog.querySelector('[data-export-rename]').value = held.rename ?? '';
   exportDialog.querySelector('[data-export-count]').textContent =
-    `Export ${count(ids.length, 'photograph')}`;
+    `Export ${numbered(ids.length, 'photograph')}`;
   renameHint();
   exportDialog.showModal();
   exportDialog.querySelector('[type="submit"]').focus();
@@ -1028,7 +1028,7 @@ document.querySelector('[data-export-form]').addEventListener('submit', (event) 
   exportDialog.close();
   if (!ids.length) return;
   // Work in flight lives on the status line; the toast is for the outcome.
-  update({ doing: `Exporting ${count(ids.length, 'photograph')}…` });
+  update({ doing: `Exporting ${numbered(ids.length, 'photograph')}…` });
   product.exportPhotos(ids, quality, edge, rename).then((said) => {
     update({ doing: '' });
     if (!said.chosen) return;
@@ -1186,7 +1186,7 @@ async function restack(verb, ids) {
     if (!members.length) { notify(verb === 'stack' ? 'No burst around this frame — mark the frames and press S.' : 'Nothing here is stacked.'); return; }
     await refreshInPlace();
     const n = members.length;
-    undo.show(`${verb === 'stack' ? 'Stacked' : 'Unstacked'} ${count(n, 'photograph')}.`, async () => {
+    undo.show(`${verb === 'stack' ? 'Stacked' : 'Unstacked'} ${numbered(n, 'photograph')}.`, async () => {
       if (verb === 'stack') await product.unstack([members[0]]);
       else await product.stack(members);
       await refreshInPlace();
@@ -1253,7 +1253,7 @@ async function scanDrive(drive) {
     await refreshInPlace();
     await loadFolders();
     notify(result.applied
-      ? `${count(result.photos_added, 'photograph')} added.`
+      ? `${numbered(result.photos_added, 'photograph')} added.`
       : result.reason || 'The folder could not be fully read.');
   } catch (error) {
     notify(why(error));
@@ -1570,10 +1570,10 @@ function renderChrome(state) {
   document.querySelector('[data-photo-count]').textContent = state.view === 'import'
     ? ''
     : state.view === 'people'
-      ? count((state.people || []).length, 'person', 'people')
+      ? numbered((state.people || []).length, 'person', 'people')
       : state.view === 'library' && !seeking() && !(state.folders || []).length && !state.album && !(state.chips || []).length && state.counts.photos > state.total
-        ? `${count(state.total, 'photograph')} · ${(state.counts.photos - state.total).toLocaleString()} behind covers`
-        : count(state.total, 'photograph');
+        ? `${numbered(state.total, 'photograph')} · ${(state.counts.photos - state.total).toLocaleString()} behind covers`
+        : numbered(state.total, 'photograph');
   document.querySelector('[data-sidebar-count]').textContent = held;
   // A library with nothing in it offers nothing to filter, sort, size or
   // rank: the bar keeps its height and loses its controls until the first

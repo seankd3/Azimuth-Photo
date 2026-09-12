@@ -1,5 +1,5 @@
 import { why } from '../kit/why.js';
-import { count } from '../kit/words.js';
+import { numbered } from '../kit/words.js';
 
 export function createTrashWorkflow({ product, read, reload, notify, undo, selection }) {
   const dialog = document.querySelector('[data-empty-dialog]');
@@ -23,7 +23,7 @@ export function createTrashWorkflow({ product, read, reload, notify, undo, selec
       await reload();
       const n = result.changed.length;
       if (n) {
-        undo.show(n === 1 ? 'Photograph restored.' : `${count(n, 'photograph')} restored.`,
+        undo.show(n === 1 ? 'Photograph restored.' : `${numbered(n, 'photograph')} restored.`,
           () => product.undoCull(result.changed).then(reload));
       }
     } catch (reason) {
@@ -66,8 +66,8 @@ export function createTrashWorkflow({ product, read, reload, notify, undo, selec
       closeDialog();
       await reload();
       notify(result.errors.length
-        ? `${count(result.emptied.length, 'photograph')} permanently deleted, ${result.errors.length.toLocaleString()} could not be.`
-        : `${count(result.emptied.length, 'photograph')} permanently deleted.`);
+        ? `${numbered(result.emptied.length, 'photograph')} permanently deleted, ${result.errors.length.toLocaleString()} could not be.`
+        : `${numbered(result.emptied.length, 'photograph')} permanently deleted.`);
     } catch (reason) {
       error.textContent = reason.message;
     } finally {

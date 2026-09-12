@@ -6,7 +6,7 @@ import { why } from '../kit/why.js';
 import { showMenu, hideMenu } from '../kit/menu.js';
 import { acceptDrops } from '../kit/drop.js';
 import { icon } from '../kit/icons.js';
-import { count } from '../kit/words.js';
+import { numbered } from '../kit/words.js';
 
 export function createLabelsPanel({ product, update, browse, ask, notify, undo }) {
   const section = document.querySelector('[data-labels-section]');
@@ -45,10 +45,10 @@ export function createLabelsPanel({ product, update, browse, ask, notify, undo }
       const name = document.createElement('span');
       name.className = 'leaf';
       name.textContent = entry.term;
-      const count = document.createElement('span');
-      count.className = 'set-count';
-      count.textContent = `~${entry.count.toLocaleString()}`;
-      row.append(mark, name, count);
+      const tally = document.createElement('span');
+      tally.className = 'set-count';
+      tally.textContent = `~${entry.count.toLocaleString()}`;
+      row.append(mark, name, tally);
       return row;
     }));
   }
@@ -97,7 +97,7 @@ export function createLabelsPanel({ product, update, browse, ask, notify, undo }
       try {
         await product.teach(row.dataset.term, ids, true);
         await refresh();
-        notify(`${ids.length === 1 ? 'This photograph' : count(ids.length, 'photograph')} taught as “${row.dataset.term}”.`);
+        notify(`${ids.length === 1 ? 'This photograph' : numbered(ids.length, 'photograph')} taught as “${row.dataset.term}”.`);
       } catch (error) {
         notify(why(error));
       }
