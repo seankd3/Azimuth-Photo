@@ -64,7 +64,7 @@ def main() -> int:
     said = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "native_proof.py"), str(home), str(out),
          "--probe", str(probe), "--wait", "8", "--gap", "1"],
-        capture_output=True, text=True, timeout=180, cwd=ROOT,
+        capture_output=True, text=True, timeout=180, cwd=ROOT, check=False,
     )
     lines = [line for line in said.stdout.splitlines() if line.startswith("PROBE ")]
     if not lines:
