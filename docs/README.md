@@ -34,6 +34,7 @@ When documents disagree, the owner for that kind of fact wins.
   measurements in [`examples/guided-filter/`](examples/guided-filter/).
 - [Performance budgets](PERF_BUDGETS.md) — user-visible latency constraints.
 - [Taste, sharpness and culling research](taste-and-culling-research.md) —
+- [Panorama detection and stitching research](panorama-research.md) — the sweep rule, the stitching pipeline, the raw path, the build order.
   the 09-10 studies distilled: the facets, the head, the experiments in order.
 - [Gate study](GATES.md) — evidence behind the mechanical constraints.
 - [Rewrite ledger](REWRITE_LEDGER.md) — exact rebuilt, proven, and removed

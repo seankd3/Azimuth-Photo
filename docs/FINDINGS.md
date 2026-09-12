@@ -741,3 +741,12 @@ finding was checked and the numbers said no.
 | E3 | A per-genre residual, so a night lake and a portrait stop sharing one scale | rejected by measurement: 16/32/64 k-means cluster offsets beside the direction move round accuracy 0.516 → 0.515–0.520 (noise); each photograph's own residual in the one-stage fit already absorbs its genre | rejected |
 | E4 | Learn's uncertainty was a count of rounds (1/√(1+n)), not what the rounds could still teach | `rank.uncertainty`: the fit's own (the Fisher information, Σ p(1−p) over a photograph's rounds plus the pull); Learn draws by it. Simulated (3 seeds, 2,000 photographs, rounds of 9): whole-order rho .331 → .346 and top-decile recall .458 → .463 at 600 rounds, rho .224 → .261 at 300 | shipped |
 | E5 | Burst-best is unmeasured | facets alone against the owner's picks within cadence stacks; the why on the tile from the largest term | open |
+
+## Panoramas (2026-09-12, from docs/panorama-research.md)
+
+| # | Finding | Fix | Status |
+|---|---|---|---|
+| PN1 | A swept sequence is not recognised: every run of frames is a burst to the library | detect and preview: gates A (metadata) and B (overlap geometry on the 1,024 tiles, the Brown–Lowe verification, monotone direction, the i→i+2 test) over runs; a badge and a proposal, never an automatic group; a preview strip and an honest refusal | open |
+| PN2 | No merge | full-resolution merge through the detailed stitching API reusing the detection's bundle adjustment: projection by field of view, blocks-gain before the seams, graph-cut seams, multi-band blend, auto-crop with the canvas kept; a 16-bit TIFF that becomes the stack's cover | open |
+| PN3 | A merge that is not a photograph | the raw path: linear demosaic, stitched in linear light, a linear DNG with the first frame's metadata and a sidecar naming the members; boundary-warp edge recovery as one slider | open |
+
