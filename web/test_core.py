@@ -1607,6 +1607,22 @@ class OwedIsAQuery(CoreCase):
         unplaced = self._catalogued("Raws/unplaced.CR3")
         self.assertIn(unplaced, [r["id"] for r in work.owed(self.conn, self.thumb, attached=attached)])
 
+    def test_an_answer_whose_file_is_gone_is_owed_not_away(self):
+        # X94. The sharpness pass reads the loupe, and a loupe row that says
+        # ready with its file gone answers None -- which counted as a locate
+        # miss for the root. Eight of those and the root's other work was
+        # skipped for the step, with the drive right there.
+        reading = cache.Kind(name="reading", source=lambda conn, row: None,
+                             compute=lambda source, hash: cache.Made(value="x", bytes=1))
+        waiting = self._catalogued("Raws/waiting.CR3")
+        for n in range(work.MISSES + 1):
+            newer = self._catalogued(f"Raws/newer-{n}.CR3")
+            self.conn.execute("UPDATE images SET date_taken = '2099-01-01' WHERE id = ?", (newer,))
+            cache.make(self.conn, f"Raws/newer-{n}.CR3", self.thumb, self.write(self.hot_root))
+        self.conn.commit()
+        did = work.step(self.conn, (reading, self.thumb), yield_to=lambda: False)
+        self.assertEqual(did and did["photo"], waiting)
+
     def test_a_failure_is_not_rediscovered_every_pass(self):
         boom = cache.Kind(name="boom", compute=lambda source, hash: 1 / 0)
         self._catalogued()

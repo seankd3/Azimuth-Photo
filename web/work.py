@@ -399,7 +399,9 @@ def _most_owed(conn, kinds: tuple[cache.Kind, ...], scope: Scope,
     # has no copy row to say so); a run of them means the drive is away for
     # all of them. Once eight heads under one root could not be located,
     # the rest of that root are skipped without a probe, and the walk goes
-    # on to identity work and to other roots.
+    # on to identity work and to other roots. Only a look at the disk counts:
+    # a kind that reads another answer (the sharpness pass reads the loupe)
+    # says None when that answer's file is gone, which is owed, not away.
     misses: dict[str, int] = {}
     for _age_key, what, kind, recipe, row in heads:
         if what == "identity":
@@ -414,7 +416,8 @@ def _most_owed(conn, kinds: tuple[cache.Kind, ...], scope: Scope,
             conn, row["tail"], expected_size=row["file_size"], roots=attached))
         source = find(conn, row)
         if source is None:
-            misses[root] = misses.get(root, 0) + 1
+            if kind.source is None:
+                misses[root] = misses.get(root, 0) + 1
             continue
         entry = cache.make(conn, row["hash"], kind, source, recipe)
         if entry is not None and kind.project is not None:

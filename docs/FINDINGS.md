@@ -691,7 +691,7 @@ finding was checked and the numbers said no.
 | X91 | `_refacet_pending` could stick if the lane refused the job | reset on refusal | shipped |
 | X92 | Zoomed on a preview the chip claimed a percentage of the original | Fit · preview | shipped |
 | X93 | Loupe eviction bounds sharpness coverage (the pass wants the plain loupe row, which the ceiling may drop first) | known: the ceiling is half the free disk; a photograph's sharpness is owed again when its loupe is remade | open |
-| X94 | A ready loupe row whose file is gone counts as a locate miss for its root | known, rare; a sentinel would be the fix | open |
+| X94 | A ready loupe row whose file is gone counts as a locate miss for its root | known, rare; a sentinel would be the fix | shipped 09-12: no sentinel needed -- only a look at the disk counts as a miss; a kind that reads another answer (`kind.source`) saying None is owed, not away, so nine evicted loupes no longer skip a root's tiles for the step. Refuted by `test_an_answer_whose_file_is_gone_is_owed_not_away` |
 
 ## The owner's sitting (2026-09-11)
 
