@@ -132,6 +132,7 @@ finding was checked and the numbers said no.
 | E2-3 | The sharpness pass failed on real faces ("unknown C++ exception from OpenCV"): the BGR frame handed to the landmark model was a reversed-stride view | contiguous; failed rows are dropped at repair and re-owed; six of Sean's faces now measure (eyes open, per-face sharpness) | shipped |
 | D4 | A fault on the page was invisible: nothing kept it and nothing wrote it down | the window keeps every thrown handler and rejected promise and reports it to the log under the home (`report` verb); the proofs read the same list | shipped |
 | D5 | A built document could pass the linter and the suite and still draw nothing | `scripts/smoke_boot.py`: a home with four photographs, the built document opened over it as the desktop does, the grid asked how many cells it drew and what it caught; part of `azimuth-check` on a desktop; the round's rule in AGENTS.md | shipped |
+| D6 | The window opened whatever document was built last, so a UI edit was invisible until someone remembered `build_desktop_ui.py`, and a proof could pass on last week's bundle (the gotcha every session note carried) | `desktop.bundled_document()` builds when any source under `web/static/v2/` or the template is newer than the build (0.5 s, marked in the log as "document built"); a failed build refuses the launch and logs why; the rule leaves AGENTS.md and development.md because the machine keeps it | shipped |
 
 ## Search box and drop (second round, 2026-09-09)
 
@@ -760,6 +761,31 @@ finding was checked and the numbers said no.
 | # | Finding | Fix | Status |
 |---|---|---|---|
 | D1 | Thirteen lines could read "1 photographs" (the drag badge, the sidebar count, the import source and summary, a person's count, the search-kept notice, Empty Trash's notice, the selection heading); twenty more spelled their own plural | one word in the kit, `count(n, one, many)`, used by every surface that says how many | shipped |
+
+## Refutation of D1-D5, PF4, PF5, E2-3 (2026-09-12, by a second model)
+
+| # | Finding | Fix | Status |
+|---|---|---|---|
+| X129 | `sharpness.tidy` dropped every failed row at every start, so a photograph the measure cannot read was re-owed and re-failed forever (work.py: a failure is an answer) | the one-time drop rides the repair's residue marker (bumped to 2026-09-12); `tidy` drops old-recipe rows alone | shipped |
+| X130 | The page's fault hook kept every fault and reported each over the bridge: a fault in a frame handler was sixty reports, sixty threads and sixty log lines a second | the hook lives in the document before the bundle (v2.html): each distinct fault once, fifty at most; the app hands it the reporter when the bridge is up and reports what was kept before | shipped |
+| X131 | The taskbar object was made on one bridge thread (COM, apartment) and used from every later one; the failure was silent | the object is made, used and released within each ask; `Desktop.close` clears the bar | shipped |
+| X132 | `version()` claimed a frozen bundle's stamp; there is none | the docstring says the checkout, or nothing | shipped |
+| X133 | `version()` read the loose ref; after a `git gc` the ref lives in packed-refs alone and the foot went blank | packed-refs is read when the loose ref is gone | shipped |
+| X134 | The smoke parsed "PROBE failed: …" as JSON and died with a traceback instead of its own verdict | only answers (`PROBE "`) are read | shipped |
+| X135 | The D3 rename turned the class `stage-day-count` into `stage-day-tally`; the stage's day counts lost their dimming | the class name restored; a class is markup | shipped |
+| X136 | `is-bare` hid the bar's controls on every launch until the counts answered, then they blinked in | the bar is bare only once the library has answered (`!state.loading`) | shipped |
+| X137 | azimuth-check's comment said the specs check the bundle on a headless runner; nothing loads it there | the comment says what happens; a headless runner builds the document and opens nothing | shipped |
+| X138 | Three lines still read "1 photographs" (freeze, save a search, the track), one "One day" became "1 day" | `numbered` on the three; "One day" kept | shipped |
+| X139 | The smoke slept a fixed eight seconds; a cold WebView2 or a loaded machine refused a good build | the probe is asked six times, two seconds apart after four; the first whole answer wins, any fault refuses | shipped |
+| X140 | The smoke left a home in `%TEMP%` per run | a temporary directory, removed after | shipped |
+| X141 | The smoke stepped the tile kinds alone, not the metadata kind the app steps first | the smoke steps metadata then tiles, the app's own order | shipped |
+| X142 | A comment read "re-lastLayout" after the rename | "re-layout" | shipped |
+| X143 | A foot with no build to name showed "Azimuth Photo" and never asked again | the foot is written only with a commit | shipped |
+| X144 | The sharpness pass holds the RGB frame and its contiguous BGR copy at once (two full frames) | held: OpenCV needs the copy; the source is dropped as the function returns | held |
+| X145 | The fault hook was installed after every module had loaded, so a fault while a module loads was never kept | the hook is in the document before the bundle (X130) | shipped |
+| X146 | development.md named `web/.venv/Scripts/`, a path git does not track; the paths gate failed on it and `azimuth-check` never reached the smoke | the guide says where without the path; the gates pass | shipped |
+| X147 | A page that stopped polling mid-import left the taskbar's bar frozen for the life of the process | `Desktop.close` clears it; the bar is set fresh on every poll (X131) | shipped |
+| X148 | The window opened whatever document was built last (D6, found by this session while the refuter ran) | see D6 | shipped |
 
 ## Refutation of E4, BC13, FR3, FR7 (2026-09-12, by a second model)
 

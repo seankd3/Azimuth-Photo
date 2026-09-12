@@ -178,7 +178,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
       const caption = document.createElement('span');
       caption.textContent = dayTitle(day);
       const tally = document.createElement('span');
-      tally.className = 'stage-day-tally';
+      tally.className = 'stage-day-count';
       tally.textContent = members.length.toLocaleString();
       head.append(box, caption, tally);
       rows.push(head);
@@ -283,7 +283,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     // The stage's own day rows are the picker; the panel says the span.
     const dated = [...byDay.keys()].filter(Boolean).sort();
     destinations.textContent = dated.length
-      ? `${numbered(dated.length, 'day')} · ${dayTitle(dated[0])}${dated.length > 1 ? ` – ${dayTitle(dated.at(-1))}` : ''}`
+      ? `${dated.length === 1 ? 'One day' : numbered(dated.length, 'day')} · ${dayTitle(dated[0])}${dated.length > 1 ? ` – ${dayTitle(dated.at(-1))}` : ''}`
       : '';
     // The destination said once, as the rule it is — every row repeating
     // the root was noise wearing a path.

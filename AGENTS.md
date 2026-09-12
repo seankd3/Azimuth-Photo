@@ -144,10 +144,10 @@ One command, and the smallest half of it when the change is small:
 
 - Docs-only: `git diff --check`, link/path review, and instruction-conflict
   search.
-- Desktop behavior: rebuild the document (`scripts/build_desktop_ui.py`) and
-  verify the actual workflow in the running app against an isolated home
-  (`AZIMUTH_HOME`). Edits to `web/static/v2/` are invisible until the bundle
-  is rebuilt.
+- Desktop behavior: verify the actual workflow in the running app against an
+  isolated home (`AZIMUTH_HOME`). The window builds its document from
+  `web/static/v2/` whenever a source is newer than the build, so an edit is
+  what the next launch shows.
 - Deletion, imports, recovery, or catalog changes: add a focused refuter and
   verify the final persisted state.
 

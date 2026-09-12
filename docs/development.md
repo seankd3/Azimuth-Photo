@@ -30,12 +30,14 @@ nothing extra: InsightFace ships in `requirements-v2.txt` and runs on the CPU.
 
 The app as its own program -- `Azimuth Photo.exe` in Task Manager, the compass
 on the taskbar, a version in Properties -- is `scripts/make_launcher.py`: it
-makes the exe in `web/.venv/Scripts/` and points the Desktop and Start Menu
-shortcuts at it. Run it again after the venv is rebuilt.
+makes the exe beside the venv's own python and points the Desktop and Start
+Menu shortcuts at it. Run it again after the venv is rebuilt.
 
-The launcher rebuilds the document, then opens `web/desktop.py`. **Edits under
-`web/static/v2/` are invisible until the document is rebuilt**; the window
-loads one file, not the source tree:
+The launcher opens `web/desktop.py`, which builds the document when any file
+under `web/static/v2/` or the template is newer than the build (half a
+second, marked in the log), so the window shows the UI the tree says. A build
+that fails refuses the launch and writes why to `logs/azimuth.log`. To build
+by hand:
 
 ```powershell
 web\.venv\Scripts\python.exe scripts\build_desktop_ui.py

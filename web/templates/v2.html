@@ -312,6 +312,26 @@
   </dialog>
 
 
-  <script type="module" src="/static/index.js"></script>
+  <script>
+// A fault on the page is kept for the proofs to ask about and handed to the
+// product's log once the bridge is up (the app sets __azimuthReport). Each
+// distinct fault once and fifty at most, so a fault in a frame handler is a
+// line in the log and not sixty a second. Here, before the bundle, so a
+// fault while a module loads is kept too.
+window.__azimuthErrors = [];
+window.__azimuthReport = null;
+(() => {
+  const seen = new Set();
+  const keep = (text) => {
+    if (seen.has(text) || seen.size >= 50) return;
+    seen.add(text);
+    window.__azimuthErrors.push(text);
+    try { if (window.__azimuthReport) window.__azimuthReport(text); } catch (_) { /* not up yet */ }
+  };
+  window.addEventListener('error', (e) => keep(`${e.message} @ ${e.filename}:${e.lineno}`));
+  window.addEventListener('unhandledrejection', (e) => keep(`unhandled: ${e.reason && e.reason.stack || e.reason}`));
+})();
+</script>
+<script type="module" src="/static/index.js"></script>
 </body>
 </html>

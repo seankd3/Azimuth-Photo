@@ -24,6 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 PHOTOS = 4
+ASKS = 6            # the probe, asked every two seconds after four: a slow machine gets sixteen
 
 PROBE = """
 (() => JSON.stringify({
@@ -42,6 +43,7 @@ def make_home(folder: Path) -> Path:
     sys.path.insert(0, str(WEB))
     os.environ["AZIMUTH_HOME"] = str(folder)
     import boot
+    import metadata
     import work
 
     photos = folder / "Photos" / "2026" / "2026-09-12"
@@ -51,29 +53,38 @@ def make_home(folder: Path) -> Path:
     with boot.Library(str(folder / "catalog" / "azimuth.db"), str(folder / "previews")) as product:
         drive = product.attach(str(folder / "Photos"))
         product.refresh(drive["uuid"])
-        while work.step(product.conn, (*product.tiles.kinds,), yield_to=lambda: False):
+        # The kinds the app's own worker steps first, in its order: the
+        # metadata, then the tiles. The heavy kinds want models the smoke
+        # does not load.
+        while work.step(product.conn, (metadata.KIND, *product.tiles.kinds), yield_to=lambda: False):
             pass
     return folder
 
 
 def main() -> int:
-    home = make_home(Path(tempfile.mkdtemp(prefix="azimuth-smoke-")))
-    probe = home / "probe.js"
-    probe.write_text(PROBE, encoding="utf-8")
-    out = home / "smoke.png"
-    said = subprocess.run(
-        [sys.executable, str(ROOT / "scripts" / "native_proof.py"), str(home), str(out),
-         "--probe", str(probe), "--wait", "8", "--gap", "1"],
-        capture_output=True, text=True, timeout=180, cwd=ROOT, check=False,
-    )
-    lines = [line for line in said.stdout.splitlines() if line.startswith("PROBE ")]
-    if not lines:
+    with tempfile.TemporaryDirectory(prefix="azimuth-smoke-", ignore_cleanup_errors=True) as made:
+        home = make_home(Path(made))
+        probe = home / "probe.js"
+        probe.write_text(PROBE, encoding="utf-8")
+        out = home / "smoke.png"
+        said = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "native_proof.py"), str(home), str(out),
+             *(("--probe", str(probe)) * ASKS), "--wait", "4", "--gap", "2"],
+            capture_output=True, text=True, timeout=180, cwd=ROOT, check=False,
+        )
+    # An answer is a JSON string; a probe that failed prints "PROBE failed: ...".
+    answers = [json.loads(json.loads(line[len("PROBE "):]))
+               for line in said.stdout.splitlines() if line.startswith('PROBE "')]
+    if not answers:
         print(said.stdout[-2000:], said.stderr[-2000:], file=sys.stderr)
         print("smoke: the window never answered", file=sys.stderr)
         return 1
-    answer = json.loads(json.loads(lines[-1][len("PROBE "):]))
-    ok = answer["cells"] == PHOTOS and not answer["errors"]
-    print(f"smoke: {answer['cells']} of {PHOTOS} cells, {answer['count']!r}, errors {answer['errors']}")
+    # The first answer with the whole grid drawn, else the last: a slow
+    # machine takes longer to draw, and a fault is a fault whenever caught.
+    answer = next((a for a in answers if a["cells"] == PHOTOS), answers[-1])
+    errors = [text for a in answers for text in a["errors"]]
+    ok = answer["cells"] == PHOTOS and not errors
+    print(f"smoke: {answer['cells']} of {PHOTOS} cells, {answer['count']!r}, errors {errors}")
     print("smoke: the build opens" if ok else "smoke: REFUSED")
     return 0 if ok else 1
 

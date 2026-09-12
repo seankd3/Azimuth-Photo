@@ -312,7 +312,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
       }
       if (action === 'freeze-album') {
         const frozen = await product.freezeAlbum(id);
-        undo.show(`Frozen — ${frozen.frozen.toLocaleString()} photographs are now yours to edit by hand.`, async () => {
+        undo.show(`Frozen — ${numbered(frozen.frozen, 'photograph')} ${frozen.frozen === 1 ? 'is' : 'are'} now yours to edit by hand.`, async () => {
           await product.redefineAlbum(id, frozen.criteria);
           await refresh();
           if (read().album === id) await reload();
@@ -382,7 +382,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
       const name = await prompt('New album from selection', spot, '', { not: albumNames() });
       if (!name) return;
       const kept = await product.savePhotos(name, ids).catch((error) => { notify(why(error)); return null; });
-      if (kept) { await refresh(); notify(`“${name}” keeps ${kept.kept.toLocaleString()} photographs.`); }
+      if (kept) { await refresh(); notify(`“${name}” keeps ${numbered(kept.kept, 'photograph')}.`); }
     }));
     if (viewing) {
       rows.push(item(

@@ -75,9 +75,16 @@ def repair(conn) -> None:
     # The residue rules below are one-shot repairs of retired rules; once a
     # catalog has been through them they cost a scan for nothing, so the
     # log remembers which version of them ran.
-    RESIDUE = "residue-2026-09-10"
+    RESIDUE = "residue-2026-09-12"
     residue_done = decisions.latest(conn, work.MACHINE, "repaired") == RESIDUE
     sharpness.tidy(conn)
+    # Residue of the sharpness pass that failed on real faces (a
+    # non-contiguous frame handed to the landmark model, fixed 2026-09-12):
+    # its failed rows are re-owed once. Once, because a failure is an
+    # answer (work.py): dropping them at every start would re-read an
+    # unreadable file forever.
+    if not residue_done:
+        conn.execute("DELETE FROM cache WHERE kind = 'sharpness' AND state = 'failed'")
     # Residue of the retired rule that stored a projection failure as the
     # photograph's answer: "failed" rows with no value, poisoned by a
     # moment's lock contention, which stopped 27 real photos from ever

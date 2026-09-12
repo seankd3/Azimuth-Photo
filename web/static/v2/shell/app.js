@@ -23,19 +23,12 @@ import { icon } from '../kit/icons.js';
 import { createTimeline } from './timeline.js';
 import { numbered } from '../kit/words.js';
 
-// A fault on the page is read the same way as a fault in the product: kept
-// for the proofs to ask about, and written to the log under the home.
-window.__azimuthErrors = [];
-for (const [kind, said] of [
-  ['error', (event) => `${event.message} @ ${event.filename}:${event.lineno}`],
-  ['unhandledrejection', (event) => `unhandled: ${event.reason?.stack || event.reason}`],
-]) {
-  window.addEventListener(kind, (event) => {
-    const text = said(event);
-    window.__azimuthErrors.push(text);
-    try { product.report(text).catch(() => {}); } catch { /* the bridge is not up yet */ }
-  });
-}
+// A fault on the page is read the same way as a fault in the product:
+// written to the log under the home. The document keeps them (v2.html,
+// before any module loads); from here on each new one is reported, and
+// the ones kept before the bridge was up go first.
+window.__azimuthReport = (text) => product.report(text).catch(() => {});
+for (const text of window.__azimuthErrors) window.__azimuthReport(text);
 
 // A page is at least a viewport at the densest setting, so a 4K window
 // does not straddle three pages on every scroll frame; never past what the
@@ -1593,7 +1586,7 @@ function renderChrome(state) {
   // rank: the bar keeps its height and loses its controls until the first
   // photographs arrive, so the one thing on screen is the way to add them.
   document.querySelector('.contextbar').classList.toggle(
-    'is-bare', state.view === 'library' && !seeking() && (state.counts.photos || 0) === 0);
+    'is-bare', state.view === 'library' && !state.loading && !seeking() && (state.counts.photos || 0) === 0);
   document.querySelector('[data-trash-count]').textContent = state.counts.trash.toLocaleString();
   // The label speaks about the person's photographs, not the app's memory:
   // how many are selected, or nothing — the title already carries the count.
@@ -1878,7 +1871,7 @@ document.addEventListener('click', (event) => {
   if (action === 'adopt-track') {
     folderMenu.hidden = true;
     product.adoptTrack().then((said) => {
-      if (said.chosen) notify(said.placed ? `${said.placed.toLocaleString()} photographs placed from the track.` : 'The track covers none of your photographs — check the camera clock.');
+      if (said.chosen) notify(said.placed ? `${numbered(said.placed, 'photograph')} placed from the track.` : 'The track covers none of your photographs — check the camera clock.');
     }).catch((error) => notify(why(error)));
   }
   if (action === 'rescan-drive') {
@@ -1999,7 +1992,7 @@ document.addEventListener('keydown', (event) => {
     const foot = keysDialog.querySelector('[data-keys-foot]');
     if (!foot.textContent) {
       product.version().then((v) => {
-        foot.textContent = ['Azimuth Photo', v.commit, v.when].filter(Boolean).join(' \u00b7 ');
+        if (v.commit) foot.textContent = ['Azimuth Photo', v.commit, v.when].filter(Boolean).join(' \u00b7 ');
       }).catch(() => {});
     }
     keysDialog.showModal();

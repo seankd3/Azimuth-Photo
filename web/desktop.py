@@ -31,9 +31,29 @@ def mark(what: str) -> None:
 
 
 def bundled_document() -> Path:
+    """The one document the window opens. In a checkout it follows its
+    sources: when any file under `web/static/v2/` or the template is newer
+    than the built document, it is built again here (half a second), so
+    the window always shows the UI the tree says and never the one built
+    last week. A build that fails is a launch that refuses, and says why."""
+
     if getattr(sys, "frozen", False):
         return Path(sys._MEIPASS) / "desktop" / "index.html"
-    return Path(__file__).parents[1] / "build" / "desktop" / "index.html"
+    root = Path(__file__).parents[1]
+    made = root / "build" / "desktop" / "index.html"
+    sources = [root / "web" / "templates" / "v2.html", *(p for p in (root / "web" / "static" / "v2").rglob("*") if p.is_file())]
+    newest = max(p.stat().st_mtime for p in sources)
+    if not made.is_file() or made.stat().st_mtime < newest:
+        import logging
+        import subprocess
+
+        built = subprocess.run([sys.executable, str(root / "scripts" / "build_desktop_ui.py")],
+                               capture_output=True, text=True, cwd=root, check=False)
+        if built.returncode != 0:
+            logging.getLogger("azimuth").error("the desktop document did not build: %s", built.stderr.strip())
+            raise SystemExit("the desktop document did not build; see logs/azimuth.log")
+        mark("document built")
+    return made
 
 
 def bundled_icon() -> Path:
@@ -195,62 +215,62 @@ def keep_a_log(where: str | None) -> None:
 class Taskbar:
     """The taskbar button's progress bar, the way every long job of a
     professional app shows itself: ITaskbarList3 through ctypes alone, so
-    no package is added for it. Silent wherever it cannot work."""
+    no package is added for it. The window asks from a fresh thread each
+    time and a COM object belongs to the thread that made it, so the object
+    is made, used and released within the one call. Silent wherever it
+    cannot work."""
 
     def __init__(self):
         self._hwnd = 0
-        self._api = None
         self._showing = False
-        if not sys.platform.startswith("win"):
+
+    def show(self, done: int, total: int) -> None:
+        running = bool(total) and done < total
+        if not sys.platform.startswith("win") or not (running or self._showing):
             return
+        if not self._hwnd:
+            self._hwnd = _our_window()
+            if not self._hwnd:
+                return
         try:
             import ctypes
             from ctypes import wintypes
 
             ole32 = ctypes.windll.ole32
             ole32.CoInitialize(None)
+            try:
+                class GUID(ctypes.Structure):
+                    _fields_ = [("d1", wintypes.DWORD), ("d2", wintypes.WORD), ("d3", wintypes.WORD), ("d4", ctypes.c_ubyte * 8)]
 
-            class GUID(ctypes.Structure):
-                _fields_ = [("d1", wintypes.DWORD), ("d2", wintypes.WORD), ("d3", wintypes.WORD), ("d4", ctypes.c_ubyte * 8)]
+                def guid(text):
+                    out = GUID()
+                    ole32.CLSIDFromString(text, ctypes.byref(out))
+                    return out
 
-            def guid(text):
-                out = GUID()
-                ole32.CLSIDFromString(text, ctypes.byref(out))
-                return out
-
-            handle = ctypes.c_void_p()
-            made = ole32.CoCreateInstance(
-                ctypes.byref(guid("{56FDF344-FD6D-11d0-958A-006097C9A090}")), None, 1,
-                ctypes.byref(guid("{ea1afb91-9e28-4b86-90e9-9e9f8a5eefaf}")), ctypes.byref(handle))
-            if made != 0 or not handle:
-                return
-            table = ctypes.cast(ctypes.cast(handle, ctypes.POINTER(ctypes.c_void_p))[0], ctypes.POINTER(ctypes.c_void_p))
-            # ITaskbarList3's table: 3 HrInit, 9 SetProgressValue, 10 SetProgressState.
-            ctypes.WINFUNCTYPE(ctypes.HRESULT, ctypes.c_void_p)(table[3])(handle)
-            value = ctypes.WINFUNCTYPE(ctypes.HRESULT, ctypes.c_void_p, wintypes.HWND, ctypes.c_ulonglong, ctypes.c_ulonglong)(table[9])
-            state = ctypes.WINFUNCTYPE(ctypes.HRESULT, ctypes.c_void_p, wintypes.HWND, ctypes.c_int)(table[10])
-            self._api = (handle, value, state)
+                handle = ctypes.c_void_p()
+                made = ole32.CoCreateInstance(
+                    ctypes.byref(guid("{56FDF344-FD6D-11d0-958A-006097C9A090}")), None, 1,
+                    ctypes.byref(guid("{ea1afb91-9e28-4b86-90e9-9e9f8a5eefaf}")), ctypes.byref(handle))
+                if made != 0 or not handle:
+                    return
+                table = ctypes.cast(ctypes.cast(handle, ctypes.POINTER(ctypes.c_void_p))[0], ctypes.POINTER(ctypes.c_void_p))
+                # ITaskbarList3's table: 2 Release, 3 HrInit, 9 SetProgressValue, 10 SetProgressState.
+                call = ctypes.WINFUNCTYPE
+                try:
+                    call(ctypes.HRESULT, ctypes.c_void_p)(table[3])(handle)
+                    state = call(ctypes.HRESULT, ctypes.c_void_p, wintypes.HWND, ctypes.c_int)(table[10])
+                    if running:
+                        state(handle, self._hwnd, 2)   # TBPF_NORMAL
+                        call(ctypes.HRESULT, ctypes.c_void_p, wintypes.HWND, ctypes.c_ulonglong,
+                             ctypes.c_ulonglong)(table[9])(handle, self._hwnd, int(done), int(total))
+                    else:
+                        state(handle, self._hwnd, 0)   # TBPF_NOPROGRESS
+                    self._showing = running
+                finally:
+                    call(ctypes.c_ulong, ctypes.c_void_p)(table[2])(handle)
+            finally:
+                ole32.CoUninitialize()
         except Exception:  # noqa: BLE001 - a taskbar that will not answer is no error
-            self._api = None
-
-    def show(self, done: int, total: int) -> None:
-        if self._api is None:
-            return
-        if not self._hwnd:
-            self._hwnd = _our_window()
-            if not self._hwnd:
-                return
-        handle, value, state = self._api
-        try:
-            if total and done < total:
-                if not self._showing:
-                    state(handle, self._hwnd, 2)   # TBPF_NORMAL
-                    self._showing = True
-                value(handle, self._hwnd, int(done), int(total))
-            elif self._showing:
-                state(handle, self._hwnd, 0)       # TBPF_NOPROGRESS
-                self._showing = False
-        except Exception:  # noqa: BLE001
             pass
 
 
@@ -271,7 +291,7 @@ class Desktop:
         self._exported_to: str | None = None
         self._close_lock = threading.Lock()
         self._first_page_said = False
-        self._taskbar = None
+        self._taskbar = Taskbar()
         self._closed = False
         if home_path:
             self._settle(home_path)
@@ -309,15 +329,22 @@ class Desktop:
 
     def version(self) -> dict:
         """Which build this is: the checkout's commit and when it was made,
-        read from the repository's own files (no git process), or the
-        frozen bundle's stamp."""
+        read from the repository's own files (no git process). Empty where
+        there is no checkout, and the foot says nothing rather than a build
+        it cannot name."""
 
         root = Path(__file__).resolve().parents[1]
         try:
             head = (root / ".git" / "HEAD").read_text(encoding="utf-8").strip()
             commit = head
             if head.startswith("ref:"):
-                commit = (root / ".git" / head.split(" ", 1)[1].strip()).read_text(encoding="utf-8").strip()
+                ref = head.split(" ", 1)[1].strip()
+                try:
+                    commit = (root / ".git" / ref).read_text(encoding="utf-8").strip()
+                except OSError:
+                    # After a gc the ref lives in packed-refs alone.
+                    packed = (root / ".git" / "packed-refs").read_text(encoding="utf-8").splitlines()
+                    commit = next(line.split()[0] for line in packed if line.endswith(" " + ref))
             last = (root / ".git" / "logs" / "HEAD").read_text(encoding="utf-8").strip().splitlines()[-1]
             stamp = int(last.split(">", 1)[1].split()[0])
             when = time.strftime("%d %b %Y", time.localtime(stamp))
@@ -589,8 +616,6 @@ class Desktop:
         status = self._product.intake_status() if self._product else {"phase": "idle"}
         # The window polls this once a second while a card comes in; the
         # taskbar button carries the same progress.
-        if self._taskbar is None:
-            self._taskbar = Taskbar()
         running = status.get("phase") == "bringing"
         self._taskbar.show(int(status.get("done") or 0), int(status.get("total") or 0) if running else 0)
         return status
@@ -671,6 +696,7 @@ class Desktop:
         with self._close_lock:
             if self._closed:
                 return
+            self._taskbar.show(0, 0)
             if self._product is not None:
                 self._wait(self._product.close())
             self._closed = True

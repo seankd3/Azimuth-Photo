@@ -263,12 +263,7 @@ def tidy(conn) -> int:
     """The rows of a measure no longer asked for, gone: never evicted and
     never read, they would sit in the catalog for good."""
 
-    gone = conn.execute("DELETE FROM cache WHERE kind = 'sharpness' AND recipe != ?", (RECIPE,)).rowcount
-    # A failed row is re-owed: the measure that failed on a real face (a
-    # non-contiguous frame handed to the landmark model) is fixed, and a
-    # failure is never a fact worth keeping about a photograph.
-    gone += conn.execute("DELETE FROM cache WHERE kind = 'sharpness' AND state = 'failed'").rowcount
-    return gone
+    return conn.execute("DELETE FROM cache WHERE kind = 'sharpness' AND recipe != ?", (RECIPE,)).rowcount
 
 
 def of(conn, digest: str) -> dict | None:

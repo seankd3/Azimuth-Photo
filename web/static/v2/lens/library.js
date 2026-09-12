@@ -367,7 +367,7 @@ function renderGrid(grid, state, actions) {
   const layoutNow = currentLayout(grid.clientWidth, actions.rowHeight, count);
   let scrollTop = actions.scrollTop;
   if (anchor && layoutNow !== before) {
-    // Keep the first visible cell where it was on screen across the re-lastLayout.
+    // Keep the first visible cell where it was on screen across the re-layout.
     scrollTop = Math.max(0, placeGridCell(layoutNow, anchor.index).top - anchor.offset);
     if (Math.abs(scrollTop - actions.scrollTop) >= 1) actions.scrollTo(scrollTop);
   }
