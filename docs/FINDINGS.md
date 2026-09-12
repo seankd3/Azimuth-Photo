@@ -687,6 +687,20 @@ finding was checked and the numbers said no.
 | X93 | Loupe eviction bounds sharpness coverage (the pass wants the plain loupe row, which the ceiling may drop first) | known: the ceiling is half the free disk; a photograph's sharpness is owed again when its loupe is remade | open |
 | X94 | A ready loupe row whose file is gone counts as a locate miss for its root | known, rare; a sentinel would be the fix | open |
 
+## The owner's sitting (2026-09-11)
+
+| # | Finding | Fix | Status |
+|---|---|---|---|
+| PW1 | Merging or renaming on the People wall felt slow: the rank lane reranked the whole space before it rewrote the groups, and the wall showed the old groups until then | people rewrite first on the lane (0.6 s on his catalog) and the pulse says so at once; the rerank follows only when rounds or the space moved | shipped |
+| PW2 | The wall waited for the lane to wear a name | the card wears the name, or the two cards become one, the moment the verb returns; the true groups land underneath | shipped |
+| PW3 | Typing a name someone already answers to gave no sign that Save joins them | the field says "Joins “Ada” — the two become one person" as you type | shipped |
+| PW4 | The rail marked months only | every day with photographs leaves a hairline, longer the fuller the day; the word under the hand says the day and how many | shipped |
+| PW5 | The fold tabs floated mid-height on the seams and a lid hung under the search box | the sidebar's and top bar's tabs share the workspace's top-left corner on the bar row; the inspector's sits on its seam at the same height; a hidden panel's tab waits where it was | shipped |
+| PK1 | A console window titled with python.exe's path appeared while he worked | it was the headless UI harness's stub server run from this session, not the app; stopped | closed |
+| PK2 | Task Manager and the taskbar said python | a launcher `Azimuth Photo.exe` in the venv (the interpreter's own launcher wearing the app's icon, name and version), the shortcut pointing at it; the frozen build named and versioned the same way | open |
+| IM1 | The import dialog offers no Copy or Move | Move = the copy verified, then the source removed (what `clear_source` already does), as the dialog's own choice | open |
+| IM2 | A photograph culled before comes back on every re-import | the decision log already holds the cull by identity: a culled identity stays out by default, the import says how many, one click brings them anyway | open |
+
 ## Taste and sharpness program (2026-09-10, from docs/taste-and-culling-research.md)
 
 | # | User impact | Fix | Status |

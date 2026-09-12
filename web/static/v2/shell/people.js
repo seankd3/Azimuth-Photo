@@ -262,6 +262,8 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
       // The way back replays the log: every face named by this Yes answers
       // to what it answered to before, whichever side and however many.
       const done = await product.samePeople(pair.a.exemplar, pair.b.exemplar, called);
+      maybe = maybe.filter((m) => m !== pair);
+      wear(pair.a.exemplar, called, pair.b.exemplar);
       undo.show(`“${pair.a.term}” and “${pair.b.term}” are one: “${called}”.`, async () => {
         await product.unnameSince(done.since, done.until);
         await renamed();
@@ -283,11 +285,28 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
     }
   }
 
+  // The wall's own answer, before the lane's: the card wears the name (or
+  // the two cards become one) the moment the verb returns, and the true
+  // groups land underneath within the second.
+  function wear(exemplar, called, absorbing = null) {
+    const held = read().people || [];
+    const gone = absorbing ? held.find((p) => p.person === absorbing) : null;
+    update({
+      people: held
+        .filter((p) => p !== gone)
+        .map((p) => (p.person === exemplar
+          ? { ...p, term: called, settled: true, count: p.count + (gone ? gone.count : 0) }
+          : p)),
+    });
+  }
+
   async function introduce(exemplar, current, settled, anchor) {
-    const called = await ask(settled ? 'Rename to' : 'Name this person', anchor, settled ? current : '');
+    const others = (read().people || []).filter((p) => p.settled && p.person !== exemplar).map((p) => p.term);
+    const called = await ask(settled ? 'Rename to' : 'Name this person', anchor, settled ? current : '', { kind: 'person', joins: others });
     if (!called || called === current) return;
     try {
       await product.namePerson(exemplar, called);
+      wear(exemplar, called);
       const said = `“${called}” named. Their photographs gather as the library reads.`;
       // A rename is taken back by naming them what they were; a first
       // naming by taking the name back, so the face is a Someone again.

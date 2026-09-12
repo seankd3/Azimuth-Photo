@@ -457,7 +457,7 @@ const peoplePanel = createPeoplePanel({
   undo,
   browse: (term) => browseChip({ is: 'person', values: [term] }),
   renamed: () => Promise.all([albumsPanel.refresh(), peoplePanel.refresh()]),
-  ask: (title, anchor, initial) => albumsPanel.ask(title, anchor, initial),
+  ask: (title, anchor, initial, options) => albumsPanel.ask(title, anchor, initial, options),
 });
 // Where the loupe returns to on Esc when it was opened from somewhere
 // other than the grid: a look at one card mid-round goes back to the round.

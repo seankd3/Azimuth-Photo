@@ -1527,21 +1527,24 @@ class OwnedLibrary:
             )
             if key == self._ranked:
                 return
-            # The matrix is hundreds of megabytes on a full library and the
-            # rows are append-only, so it is re-read only when the count
-            # moved; a sitting of rounds reranks against the space in memory.
-            if self._space is None or self._space[0] != key[1]:
-                self._space = (key[1], *rank.space(conn))
-            _count, subjects, vectors = self._space
-            queries.rerank(conn, subjects, vectors)
-            self._ranked = key
-            # People ride the same rhythm: when faces landed or someone was
-            # introduced, the groups and their names rewrite whole. Needs no
-            # model — the vectors are already in the rows.
+            # People first: a name or a Yes is answered in the time the
+            # groups take to rewrite (under a second), and the window hears
+            # it at once -- not after the whole space has been reranked.
+            # Needs no model: the vectors are already in the rows.
             if key[2:] != self._peopled and key[2]:
                 persons.repeople(conn)
                 self._peopled = key[2:]
                 self.shaped += 1
+            # The matrix is hundreds of megabytes on a full library and the
+            # rows are append-only, so it is re-read only when the count
+            # moved; a sitting of rounds reranks against the space in memory,
+            # and only when the rounds or the space moved.
+            if self._space is None or self._space[0] != key[1]:
+                self._space = (key[1], *rank.space(conn))
+            _count, subjects, vectors = self._space
+            if self._ranked is None or key[:2] != self._ranked[:2]:
+                queries.rerank(conn, subjects, vectors)
+            self._ranked = key
             # Labels too: when a word was taught or the space grew, every
             # taught word's answer rewrites whole.
             import labels as taught

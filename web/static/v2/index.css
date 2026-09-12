@@ -105,17 +105,18 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   transition: color .12s var(--ease-out), background .12s var(--ease-out);
 }
 .panel-tab:hover { color: var(--text); background: rgb(38 40 45 / 95%); }
-/* the side tabs straddle their seam, so neither covers a chapter's title */
-.tab-left { left: var(--left); top: 50%; width: 20px; height: 96px; transform: translate(-50%, -50%); border-radius: 8px; }
-.tab-right { right: var(--right); top: 50%; width: 20px; height: 96px; transform: translate(50%, -50%); border-radius: 8px; }
-.hide-left .tab-left { transform: translateY(-50%) scaleX(-1); border-left: 0; border-radius: 0 8px 8px 0; }
-.hide-right .tab-right { transform: translateY(-50%) scaleX(-1); border-right: 0; border-radius: 8px 0 0 8px; }
-/* a handle on the seam, not a lid over the context bar */
-.tab-top { top: var(--top); left: 50%; width: 96px; height: 14px; transform: translate(-50%, -50%); border-radius: 8px; font-size: var(--t-label); }
-.hide-top .tab-top { transform: translateX(-50%) scaleY(-1); border-top: 0; border-radius: 0 0 8px 8px; }
-/* while the rail is up, the right tab steps aside by the rail's width */
-.app-shell:not(.hide-right):has(.timeline:not([hidden])) .tab-right { right: calc(var(--right) + var(--rail) - 10px); }
-.app-shell.hide-right:has(.timeline:not([hidden])) .tab-right { right: var(--rail); transform: translateY(-50%) scaleX(-1); border-right: 1px solid var(--line); border-radius: 8px; }
+/* The side tabs straddle their seam on the bar row -- the row the context
+   bar's own controls sit on -- so a fold control is where the controls
+   are, and a hidden panel's tab waits at the same spot to bring it back. */
+.tab-left, .tab-right { top: calc(var(--top) + var(--ctx) / 2); width: 18px; height: 26px; transform: translate(-50%, -50%); border-radius: 6px; }
+.tab-left { left: var(--left); }
+.tab-right { right: var(--right); transform: translate(50%, -50%); }
+.hide-left .tab-left { transform: translateY(-50%) scaleX(-1); border-left: 0; border-radius: 0 6px 6px 0; }
+.hide-right .tab-right { transform: translateY(-50%) scaleX(-1); border-right: 0; border-radius: 6px 0 0 6px; }
+/* the top bar's handle sits on the top seam beside the left tab: the two
+   make one corner where the seams meet, clear of every control */
+.tab-top { top: var(--top); left: calc(var(--left) + 14px); width: 40px; height: 12px; transform: translateY(-50%); border-radius: 6px; font-size: var(--t-label); }
+.hide-top .tab-top { transform: translateY(-50%) scaleY(-1); border-top: 0; border-radius: 0 0 6px 6px; }
 .hide-left .tab-left, .hide-right .tab-right, .hide-top .tab-top { color: var(--text-2); }
 
 .topbar {
@@ -242,6 +243,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .folder-row { gap: 4px; padding: 5px 8px 5px calc(8px + var(--depth, 0) * 14px); }
 .folder-row:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
 .name-pop .form-error:empty { display: none; }
+.name-pop .form-error.is-note { color: var(--text-2); }
 .side-row.is-drop, .folder-row.is-drop { background: var(--accent-tint); outline: 1px solid var(--accent); }
 .side-row .smart-mark { color: var(--accent); font-size: var(--t-label); }
 /* a drop that is refused says so where it is refused */
@@ -1225,6 +1227,12 @@ body:has(.loupe-stage:not([hidden]):not(.is-full)) .toast { bottom: calc(var(--s
 .timeline-month::after {
   content: ''; position: absolute; right: -8px; top: 50%; width: 5px; height: 1px;
   background: var(--line-strong);
+}
+/* every day with photographs: a hairline at the rail's edge, longer the
+   fuller the day; a month's tick is the stronger line among them */
+.timeline-day {
+  position: absolute; right: 0; height: 1px; margin-top: -1px;
+  background: var(--line-strong); opacity: .55; pointer-events: none;
 }
 .timeline-marker {
   right: 3px; width: 3px; height: 14px; margin-top: -7px; border-radius: 2px;

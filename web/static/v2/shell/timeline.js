@@ -43,13 +43,21 @@ export function createTimeline({ workspace, before, top, place, indexAt, scrollT
 
   const y = (index) => (total ? (index / total) * height : 0);
   const at = (offsetY) => Math.max(0, Math.min(total - 1, Math.floor((offsetY / height) * total)));
-  const dayAt = (index) => {
+  const chapterAt = (index) => {
     let found = chapters[0];
     for (const chapter of chapters) {
       if (chapter.index > index) break;
       found = chapter;
     }
-    return found ? found.day : '';
+    return found || null;
+  };
+  const dayAt = (index) => chapterAt(index)?.day || '';
+  // The word under the hand: the day, and how many it holds.
+  const wordAt = (index) => {
+    const chapter = chapterAt(index);
+    if (!chapter) return '';
+    const count = chapter.count || 0;
+    return count > 1 ? `${named(chapter.day)} · ${count.toLocaleString()}` : named(chapter.day);
   };
 
   function draw() {
@@ -62,10 +70,22 @@ export function createTimeline({ workspace, before, top, place, indexAt, scrollT
     let month = '';
     let lastWordY = -Infinity;
     let lastTickY = -Infinity;
+    let lastDayY = -Infinity;
     let lastYearDrawn = '';
     for (const chapter of chapters) {
       if (!chapter.day) continue;
       const top = y(chapter.index);
+      // Every day that has photographs leaves a line, longer for a fuller
+      // day (a doubling adds a pixel), so the rail reads as the year's
+      // shape and not only its calendar. Days closer than the line is
+      // thick share one.
+      if (top - lastDayY >= 2) {
+        const day = element('div', 'timeline-day');
+        day.style.top = `${top}px`;
+        day.style.width = `${Math.min(10, 3 + Math.floor(Math.log2(Math.max(1, chapter.count))))}px`;
+        track.append(day);
+        lastDayY = top;
+      }
       const thisYear = chapter.day.slice(0, 4);
       const thisMonth = chapter.day.slice(0, 7);
       if (thisYear !== year && top - lastWordY >= 14) {
@@ -182,7 +202,7 @@ export function createTimeline({ workspace, before, top, place, indexAt, scrollT
 
   function say(offsetY) {
     const index = at(offsetY);
-    label.textContent = named(dayAt(index));
+    label.textContent = wordAt(index);
     label.style.top = `${Math.max(10, Math.min(height - 10, offsetY))}px`;
     label.hidden = false;
     return index;
