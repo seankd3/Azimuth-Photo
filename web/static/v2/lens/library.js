@@ -286,7 +286,8 @@ function reconcileGrid(grid, state, actions, layout, range) {
     const said = `${band.title.title}\u0001${band.title.count}`;
     if (node.dataset.title !== said) {
       node.dataset.title = said;
-      node.title = `Select the ${band.title.count.toLocaleString()} of this day`;
+      node.title = `Select this day's ${numbered(band.title.count, 'photograph')}`;
+      node.setAttribute('aria-label', node.title);
       node.replaceChildren(element('span', 'day', band.title.title),
         element('span', 'count', band.title.count.toLocaleString()));
     }

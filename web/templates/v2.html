@@ -22,7 +22,7 @@
         <span data-photo-count aria-live="polite">—</span>
       </div>
       <div class="topbar-search">
-        <input data-search type="search" placeholder="Search your photos" aria-label="Search your photos" autocomplete="off" spellcheck="false">
+        <input data-search type="search" placeholder="Search your photographs" aria-label="Search your photographs" autocomplete="off" spellcheck="false">
         <button class="search-clear" type="button" data-action="search-clear" data-icon-only="close" aria-label="Clear the search"></button>
       </div>
       <div class="top-actions">
@@ -125,7 +125,7 @@
         <button class="quiet-button" type="button" data-action="restore" hidden>Restore</button>
         <button class="danger-button" type="button" data-action="empty-trash" hidden>Empty Trash</button>
       </div>
-      <section class="photo-grid" data-grid aria-label="Photographs" aria-busy="true"></section>
+      <section class="photo-grid" data-grid aria-label="Photographs" aria-busy="true" tabindex="-1"></section>
       <section class="import-stage" data-import-stage aria-label="Photographs to import" hidden></section>
       <section class="rank-stage" data-rank aria-label="Rank" tabindex="-1" hidden></section>
       <section class="face-wall" data-people-stage aria-label="People" tabindex="-1" hidden></section>
@@ -250,7 +250,7 @@
   <menu class="context-menu" role="menu" data-folder-menu hidden>
     <button type="button" role="menuitem" data-action="synchronize-folder">Synchronize folder</button>
     <hr role="separator">
-    <button type="button" role="menuitem" data-action="forget-missing">Forget missing photos…</button>
+    <button type="button" role="menuitem" data-action="forget-missing">Forget missing photographs…</button>
     <button type="button" role="menuitem" data-action="adopt-track">Add GPS track (GPX)…</button>
     <button type="button" role="menuitem" data-action="export-folder">Save metadata for Lightroom</button>
   </menu>
