@@ -146,6 +146,14 @@ a run of frames at one rhythm, and it keeps its beat through a change of focus
 or exposure — **Shift+S** unstacks, all with Undo. Stacks open by default with
 a band; a badge folds one; the bar collapses all.
 
+**A panorama sweep is a fact the library knows.** Consecutive frames that
+overlap one way — verified by features and a homography, never guessed from
+timestamps — are a sweep: the details say so, **S** stacks them, and the
+Panorama fact merges a preview from their loupe tiles to see them whole
+(refusals are the whole design: on one real library, one sweep among 446
+runs, every burst refused). The full-size merge that becomes a stack's cover
+is the next slice.
+
 **Trash is safe by design.** Deleting moves files to a `.trash` area on the same
 drive — fully restorable, byte-identical, ratings and history intact. Nothing is
 permanently removed until you empty it yourself. The machine never deletes your
