@@ -146,7 +146,7 @@ disk instead of the real one, from the manifest `scripts/test_library.tsv`
 Library of Congress, each pinned by SHA-256, in the root date-folder shape.
 The small tier (the default, two seconds) is thirty-one frames with known
 capture dates, a duplicate pair, a nested folder and an undated frame; the
-large tier (`--large`, minutes) is thousands more across 1890-1944 with
+large tier (`--large`, minutes) is thousands more across 1860-1944 with
 bursts and film rolls, for development, the proofs and `scripts/bench.py`.
 `--dest` or `AZIMUTH_TEST_LIBRARY` says where; `PROVENANCE.md` in the library
 root names each one's source and rights.

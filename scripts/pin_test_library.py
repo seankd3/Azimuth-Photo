@@ -6,6 +6,7 @@ the same on every machine because the manifest is.
 
     python scripts/pin_test_library.py            # rewrite the large tier
     python scripts/pin_test_library.py --cache D   # keep the downloads in D
+    python scripts/pin_test_library.py --redate    # reassign dates, no network
 
 Every photograph is from a Library of Congress collection whose items carry
 "No known restrictions on publication" -- the FSA/OWI transparencies and
@@ -14,11 +15,11 @@ glass negatives, the Bain News Service and Harris & Ewing prints. The small
 tier (the thirty-one the quick build uses, with its controlled cases) is kept
 as it is; this writes the large tier around it.
 
-Each collection is sampled across its whole span so the dates spread, and
-frames that the Library numbered consecutively are given consecutive seconds,
-so the fixture has bursts the way a card does. The Library catalogs a month
-or a year; the day and time are the fixture's, assigned from the item's own
-id so they never change.
+Each collection is sampled across its whole span so the dates spread. The
+Library catalogs a month or a year; the day and time are the fixture's, a
+function of the manifest alone: frames of one photographer's catalogued
+month fall in fives, three seconds apart, so the fixture has bursts the way
+a card does, and `--redate` reassigns them without a download.
 """
 from __future__ import annotations
 
@@ -50,6 +51,9 @@ COLLECTIONS = (
     ("harris-ewing", 800, "Raws/Film Scans", "Harris & Ewing", "Harris & Ewing", ()),
 )
 MONTHS = {m: i + 1 for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"))}
+YEAR = re.compile(r"\b(18\d\d|19\d\d)\b")
+# Frames per burst; four on one beat is what web/stacks.py calls a set.
+BURST = 5
 PER_PAGE = 100
 
 
@@ -94,8 +98,8 @@ def sample(slug: str, wanted: int, years: tuple[int, ...]) -> list[dict]:
             except RuntimeError as error:   # one page refused is not the collection lost
                 print(f"  {slug}{facet}: page {page} skipped: {error}", file=sys.stderr)
                 continue
-            for rank, result in enumerate(body.get("results", [])):
-                row = record(result, rank)
+            for result in body.get("results", []):
+                row = record(result)
                 if row is not None:
                     chosen.append(row)
                     taken += 1
@@ -103,7 +107,7 @@ def sample(slug: str, wanted: int, years: tuple[int, ...]) -> list[dict]:
     return chosen[:wanted]
 
 
-def record(result: dict, rank: int) -> dict | None:
+def record(result: dict) -> dict | None:
     item = result.get("item") or {}
     service = [u.split("#")[0] for u in result.get("image_url", []) if u.split("#")[0].endswith("v.jpg")]
     if not service or not service[0].startswith(TILE):
@@ -112,8 +116,7 @@ def record(result: dict, rank: int) -> dict | None:
     if isinstance(catalogued, list):
         catalogued = catalogued[0] if catalogued else ""
     catalogued = str(catalogued).strip()
-    when = _when(catalogued, result["id"], rank)
-    if when is None:
+    if not YEAR.search(catalogued):
         return None
     by = (result.get("contributor") or [""])[0]
     return {
@@ -123,7 +126,6 @@ def record(result: dict, rank: int) -> dict | None:
         "catalogued": catalogued,
         "title": re.sub(r"\s+", " ", result.get("title", "")).strip().rstrip(".").replace('"', "'"),
         "path": service[0][len(TILE):],
-        "taken": when,
     }
 
 
@@ -136,25 +138,37 @@ def _person(by: str) -> str:
     return by.title()
 
 
-def _when(catalogued: str, item_url: str, rank: int) -> str | None:
-    """A capture date the fixture assigns inside what the Library says: the
-    year (the first of a range), the month when named, the day from the
-    item's own digits, the seconds from its place on the page so consecutive
-    frames are consecutive seconds."""
+def dated(rows: list[dict]) -> None:
+    """Assign every row its capture date from the manifest alone. Rows of one
+    root, roll, photographer and catalogued month are ordered by id and fall
+    in fives (`BURST`), three seconds apart -- four on one beat is a set to
+    `web/stacks.py`, so every five is a stack proposal -- and each five has
+    its own day, hour and minute inside the catalogued month."""
 
-    years = [int(y) for y in re.findall(r"\b(18\d\d|19\d\d)\b", catalogued)]
-    if not years:
-        return None
+    rows.sort(key=lambda r: (r["root"], r["roll"], r["photographer"], r["catalogued"], r["id"]))
+    position: dict[tuple, int] = {}
+    for row in rows:
+        key = (row["root"], row["roll"], row["photographer"], row["catalogued"])
+        n = position.get(key, 0)
+        position[key] = n + 1
+        row["taken"] = _when(row["catalogued"], "/".join((*key, str(n // BURST))), n % BURST)
+
+
+def _when(catalogued: str, burst: str, place: int) -> str:
+    """The year the Library catalogs (the first of a range) and the month when
+    it names one; the day, hour and minute from the burst's own name, the
+    seconds from the frame's place in it."""
+
+    years = [int(y) for y in YEAR.findall(catalogued)]
     year = years[0]
     month = next((n for word, n in MONTHS.items() if word in catalogued.lower()), None)
-    digits = int(re.sub(r"\D", "", item_url) or "0")
+    digits = int(hashlib.sha256(burst.encode()).hexdigest()[:8], 16)
     if month is None:
         month = digits % 12 + 1
     day = digits % 28 + 1
     hour = 8 + (digits // 28) % 10
     minute = (digits // 280) % 60
-    second = (rank * 2) % 60
-    return f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
+    return f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{place * 3:02d}"
 
 
 def pinned(row: dict, cache: Path | None) -> dict:
@@ -171,14 +185,21 @@ def pinned(row: dict, cache: Path | None) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description="pin the large tier of the development library")
     parser.add_argument("--cache", help="keep the downloaded bytes here, so a rerun does not fetch again")
+    parser.add_argument("--redate", action="store_true", help="reassign the large tier's dates from the manifest, no network")
     args = parser.parse_args()
     cache = Path(args.cache) if args.cache else None
     if cache is not None:
         cache.mkdir(parents=True, exist_ok=True)
 
     with MANIFEST.open(encoding="utf-8", newline="") as handle:
-        small = [row for row in csv.DictReader(handle, delimiter="\t") if row["tier"] == "small"]
+        manifest = list(csv.DictReader(handle, delimiter="\t"))
+    small = [row for row in manifest if row["tier"] == "small"]
     known = {row["id"] for row in small}
+
+    if args.redate:
+        rows = [row for row in manifest if row["tier"] == "large"]
+        dated(rows)
+        return write(small, rows)
 
     rows: list[dict] = []
     for slug, wanted, root, roll, org, years in COLLECTIONS:
@@ -199,6 +220,11 @@ def main() -> int:
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
         rows = list(pool.map(lambda r: pinned(r, cache), rows))
 
+    dated(rows)
+    return write(small, rows)
+
+
+def write(small: list[dict], rows: list[dict]) -> int:
     rows.sort(key=lambda r: (r["root"], r["taken"], r["id"]))
     with MANIFEST.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=COLUMNS, delimiter="\t", lineterminator="\n", extrasaction="ignore")
