@@ -16,6 +16,9 @@ web\.venv\Scripts\python.exe -m pip install -r web\requirements-v2.txt -r web\re
 npm ci
 ```
 
+On Linux or macOS (a cloud session, a CI runner) the same three, with the
+venv's `bin/python` where Windows has `Scripts\python.exe`.
+
 The embedding space needs one more pack (SigLIP-2 through `torch` and
 `transformers`, ~4.5 GB of weights fetched once by `embed.fetch()`); without it
 the app runs, and search, Best and labels wait for vectors. People needs
@@ -63,6 +66,24 @@ library.
 
 `docs/ARCHITECTURE.md` owns the rules; `scripts/gates/layers.py` counts the
 imports that break them.
+
+## Cloud sessions
+
+Development continues from the phone. A task submitted at claude.ai/code (or
+in the Claude app) runs in a fresh Linux container that clones the repository,
+and what comes back is a branch and a draft pull request to read, comment on
+and merge from the phone. What a cloud session has and does:
+
+- The setup above, on Linux, with `python3.12` named outright (the
+  container's default `python3` may be older). Nothing of the owner's archive
+  is needed or reachable.
+- `./scripts/azimuth-check`, the same check as on Windows; with no desktop it
+  builds the document instead of opening it. CI runs it on both platforms.
+- No window. A UI change is proven in the harness (`scripts/harness.py`) and
+  by the built document; the native look and the Windows rebuild wait for the
+  owner's next sitting, and the pull request says so.
+- Its own branch, never `main`: the cloud-session exception in
+  [`AGENTS.md`](../AGENTS.md).
 
 ## Checks
 
