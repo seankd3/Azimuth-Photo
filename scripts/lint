@@ -15,5 +15,5 @@ ESLINT="$ROOT/node_modules/.bin/eslint"
 echo "==> ruff"
 (cd web && "$RUFF" check .)
 echo "==> eslint"
-"$ESLINT" web/static/v2 web/test_v2_page_cache.mjs web/test_v2_virtual_grid.mjs
+"$ESLINT" web/static/v2 web/test_v2_page_cache.mjs web/test_v2_virtual_grid.mjs scripts/harness_proof.mjs
 echo "lint: ok"
