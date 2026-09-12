@@ -945,3 +945,10 @@ The first round run by the `polish` workflow from a cloud session: eight scouts,
 |---|---|---|---|
 | LF1 | The pin assigned each frame's day, hour and minute from its own item id and only the seconds from its place on the page, so "consecutive frames consecutive seconds" never happened: 6,137 frames, three shared minutes, no stack proposals | the date is a function of the manifest: one photographer's catalogued month falls in fives three seconds apart, each five with its own day and minute; `--redate` reassigns without a download | shipped |
 | LF2 | Every fixture frame says its camera is "Kodachrome", so the cameras facet has one entry over 6,137 photographs; a facet with one value proves nothing about the facet | leave until a proof needs cameras; the medium is the honest answer for a scan, and a second constant would be a lie of a different kind | deferred |
+## Craft, from the owner's sitting (2026-09-12)
+
+| # | Finding | Fix | Status |
+|---|---|---|---|
+| CR1 | "Landscape photos vs landscape orientation": the search drop offered "Landscape" under Kind and shape and the chip said "Landscape", which reads as a subject; the drop and the chip each held their own copy of the three words; adding a chip from the search box was answered by nothing, its removal by a toast | one vocabulary, exported from the filter bar and used by the drop: "Wide (landscape)", "Tall (portrait)", "Square"; a filter added from a text field is answered in the chip's own words ("Filter added — Wide (landscape)."), the mirror of the removal toast. The harness stub answered `facets` with an empty object, so the drop had offered no shape for any probe to see; it answers the verb's four lists now | shipped |
+| CR2 | "the x on the filter toast isnt fully on the toast": the chip's × is a 16 px button holding a 16 px icon but inherited the button rule's 6 px side padding, so the icon spilled six pixels past its button and sat on the pill's curved end (measured: icon right edge 1 px from the pill's border) | the button has no padding and centres its icon; the pill's right padding is 8 px. Measured after: icon inside its button, 9 px from the pill's edge | shipped |
+

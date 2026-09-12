@@ -631,6 +631,10 @@ function applyChip(chip) {
   const same = JSON.stringify(chip);
   if (!held.some((c) => JSON.stringify(c) === same)) {
     update({ view: 'library', chips: [...held, chip] });
+    // An act from a text field is answered in words, the way its removal
+    // already is: the chip's own wording, so "Wide (landscape)" is what
+    // was asked for and not a subject (the owner, 09-12).
+    notify(`Filter added — ${filterBar.word(chip)}.`);
   } else if (read().view !== 'library' && read().view !== 'rank') {
     update({ view: 'library' });
   }

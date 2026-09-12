@@ -1,10 +1,10 @@
 export const meta = {
-  name: 'polish',
-  description: 'Audit every surface against the UI canon, refute the weak findings, fix what survives',
-  whenToUse: 'The polish round: copy, focus, cursor, hover, empty and error states, keys, units, plurals, motion, aria, one surface per scout. Run it repeatedly.',
+  name: 'craft',
+  description: 'Find the small details that make an app feel loved, one family of detail per scout; refute what would be noise; fix what survives',
+  whenToUse: 'The craft round: feedback for every act, settling and motion, rhythm and type, the voice, hints that retire, the moments worth a quiet flourish, restraint. Run it after journeys.',
   phases: [
-    { title: 'Survey', detail: 'one scout per surface, against the canon' },
-    { title: 'Refute', detail: 'try to kill each finding before believing it' },
+    { title: 'Survey', detail: 'one scout per family of detail, across every surface' },
+    { title: 'Refute', detail: 'kill what would be noise; life is not decoration' },
     { title: 'Fix', detail: 'one worktree per surviving finding, harness-proven' },
   ],
 }
@@ -185,31 +185,35 @@ async function round(scouts, perRound, fixExtra) {
   }
 }
 
-const CANON = `Judge against docs/ui-architecture.md, section by section: copy (the vocabulary, plurals,
-numbers spelled the tabular way, no jargon, every toast string a sentence a photographer would say);
-focus and keyboard (Esc layers out one surface, focus returns to the invoking control and never
-falls to the body, every icon-only control has a tooltip carrying its key, ? lists it); cursor and
-hover (rest state carries the information, hover only adds, no hover-only affordance); states (an
-empty state is a verb, a wait under 200 ms shows nothing, a longer one shows a skeleton, an error
-says what to do); motion (frequency rule: a hundred-a-day act has no motion, tens-a-day 100-160 ms,
-an arriving surface 120-250 ms, ease-out, transform and opacity only, reduced-motion honoured);
-aria (one word per element; a live region for what changed). The harness shows you the surface:
-write a probe, run node scripts/harness_proof.mjs, read the PROBE line and the capture.`
+const CRAFT = `The owner's ask (09-12): "all the subtle UI/UX details that breathe love and life into
+the app". The bar is Factorio and Notion. Factorio's love is feedback: every act answers at once,
+visibly, in the place it happened, and the game never lets a person wonder whether it heard them.
+Notion's love is restraint: calm type, a spacing rhythm, nothing moves that does not need to, the
+copy speaks like a person. Life comes from both, never from decoration. Judge against
+docs/ui-architecture.md (the speed covenant, the frequency rule for motion, the vocabulary) and
+against these, which are the family of detail you scout for. A finding is one place where the
+app is mute, jumpy, uneven or cold, with the file and line that decides it and the smallest change
+that gives it life; and for every finding say what it would cost a person who does this act a
+hundred times a day, because a flourish on a hundred-a-day act is noise. Not a feature. Not a
+redesign. The harness shows you the surface: write a probe, run node scripts/harness_proof.mjs,
+read the PROBE line and the capture.`
 
-const SURFACES = [
-  { key: 'grid-and-shell', ask: `${CANON}\n\nSurface: the grid and the shell around it (web/static/v2/shell/app.js, lens/library.js, kit/virtual-grid.js, index.css): cells, day chapters, selection and the cursor, the top bar, the sort and size controls, the fold tabs, the status line.` },
-  { key: 'loupe', ask: `${CANON}\n\nSurface: the loupe (shell/loupe.js and its CSS): opening and closing, the zoom chip, arrows, the filmstrip, the key hints on first opens, what the inspector says beside it.` },
-  { key: 'rank', ask: `${CANON}\n\nSurface: Rank (shell/rank.js): the stage, the modes, the card sizes, a round, undo, Done, the count line.` },
-  { key: 'sidebar-albums-folders', ask: `${CANON}\n\nSurface: the sidebar (shell/albums.js, filters.js, the folder tree and drives in app.js): naming, renaming, the + control, the popovers, the counts, drag targets and what they say when they refuse.` },
-  { key: 'search-and-command', ask: `${CANON}\n\nSurface: the search box and drop (shell/searchcards.js and the search parts of app.js), the > command mode, saved searches, the chips.` },
-  { key: 'people-and-labels', ask: `${CANON}\n\nSurface: the People wall and the Same person? card (shell/people.js), Labels (shell/labels.js): naming, merging, undo, the chips, the empty states.` },
-  { key: 'import-and-dialogs', ask: `${CANON}\n\nSurface: the import workspace (shell/intake.js), the drive dialog, first run and the home chooser, Trash and Empty trash (shell/trash.js), the export dialog: every dialog's focus, Esc, copy, and its empty and error states.` },
-  { key: 'inspector-timeline-toasts', ask: `${CANON}\n\nSurface: the details inspector (the right panel in app.js), the timeline rail (shell/timeline.js, kit/days.js), toasts and the why-copy (kit/why.js, kit/words.js), the keyboard map (?).` },
+const FAMILIES = [
+  { key: 'answered-at-once', ask: `${CRAFT}\n\nFamily: every act answered. For each key and click in the grid, loupe, Rank, sidebar and search: what changes on screen within 100 ms, where, and is it in the place the act happened (the cell, the card, the count) rather than a toast elsewhere; and every act from a text field (search, a chip, naming a person, a label, a rename) answered in words as well, because the owner asked for it (09-12: "I really like toasts, esp in the people area and search, and other text fields ... but everywhere"), in the wording the thing will wear, so a word with two readings is disambiguated (his example: "Landscape photos vs landscape orientation"). List every act the app answers with nothing, or late, or somewhere else, and every text-field act with no sentence.` },
+  { key: 'settling', ask: `${CRAFT}\n\nFamily: settling. When a set changes (a pick leaves, tiles arrive, a sort flips, Best reorders, a stack folds), does the change settle or jump: what moves, over how long, with what easing, and whether a person can follow what went where. Hold each to the frequency rule; jumps on tens-a-day acts and motion on hundreds-a-day acts are both findings.` },
+  { key: 'rhythm-and-type', ask: `${CRAFT}\n\nFamily: rhythm and type (index.css and every shell CSS). One spacing scale, honoured; one type scale; numbers tabular and aligned; optical alignment of icons to text; consistent radii, borders and shadows; the same control the same size everywhere. Measure in the harness (getComputedStyle) rather than reading the CSS alone; list every stray value.` },
+  { key: 'the-voice', ask: `${CRAFT}\n\nFamily: the voice. Every string a person reads: toasts, empty states, tooltips, the count line, the inspector, dialogs, errors (kit/words.js, kit/why.js and inline). Does it speak like a photographer would to a friend, in a sentence, with the right plural and the vocabulary; does it say what happened and what to do; is it the same voice everywhere. List the cold, the jargon, the label-where-a-sentence-belongs.` },
+  { key: 'hints-that-retire', ask: `${CRAFT}\n\nFamily: teaching that gets out of the way. First-time hints (the loupe's key hints, the ? map, tooltips, empty-state teaching): do they appear when a person is new, teach the key, and retire once the person has used it; do they come back when needed. Anything that teaches forever, or never, is a finding (kit/remembered.js is the memory).` },
+  { key: 'moments', ask: `${CRAFT}\n\nFamily: the moments that deserve a quiet flourish, and have none. The first sweep finishing (what it found: photographs, years, cameras); Best settling after a Rank sitting; a stack folding; Empty trash; a day's cull complete; a drive coming back. Rare acts, once-a-sitting, where a beat of acknowledgement is life and its absence is a shrug. Each is one finding with the words and the motion it would have.` },
+  { key: 'pointer-and-cursor', ask: `${CRAFT}\n\nFamily: the pointer and the cursor. Cursor shapes (grab on draggable, pointer on clickable, default on inert, not-allowed where a drop refuses), the keyboard cursor's ring and its motion, focus visible only from the keyboard, hover that adds rather than reveals, drag ghosts and drop targets that say yes or no before the drop. Measure in the harness.` },
+  { key: 'restraint', ask: `${CRAFT}\n\nFamily: restraint. The opposite scout: find what is already too much. Motion on hundreds-a-day acts, toasts on hundreds-a-day grid acts whose result is on the tile (never the toasts after a text-field act: the owner wants those), confirmations undo already covers, decoration that carries no information, colour where grey would do, two ways to say one thing. Every removal that would make the app calmer is a finding.` },
 ]
 
-const result = await round(SURFACES, 8,
+const result = await round(FAMILIES, 8,
   `A UI change is proven in the harness: write or adapt a probe under a temporary path (not in
 scripts/journeys unless it is a real task no probe covers), run node scripts/harness_proof.mjs,
 and paste the PROBE line and the capture path. The built document is what the window opens, so a
-change under web/static/v2/ is complete on its own; do not commit build/.`)
+change under web/static/v2/ is complete on its own; do not commit build/. Motion is transform and
+opacity only, honours reduced-motion, and follows the frequency rule; a rule you find missing from
+docs/ui-architecture.md, write into it in the same commit, one sentence.`)
 return result

@@ -1,9 +1,9 @@
 export const meta = {
-  name: 'polish',
-  description: 'Audit every surface against the UI canon, refute the weak findings, fix what survives',
-  whenToUse: 'The polish round: copy, focus, cursor, hover, empty and error states, keys, units, plurals, motion, aria, one surface per scout. Run it repeatedly.',
+  name: 'journeys',
+  description: "Walk each of a person's afternoons through the app, find every wait, wonder and dead end, refute the weak findings, fix what survives",
+  whenToUse: 'The journeys round: first run, a cull, a Rank sitting, finding one photograph, organising, the second sitting, discoverability, when things go wrong. The bar is Notion and Factorio. Run it repeatedly.',
   phases: [
-    { title: 'Survey', detail: 'one scout per surface, against the canon' },
+    { title: 'Survey', detail: 'one scout per journey, walked in the harness' },
     { title: 'Refute', detail: 'try to kill each finding before believing it' },
     { title: 'Fix', detail: 'one worktree per surviving finding, harness-proven' },
   ],
@@ -185,31 +185,32 @@ async function round(scouts, perRound, fixExtra) {
   }
 }
 
-const CANON = `Judge against docs/ui-architecture.md, section by section: copy (the vocabulary, plurals,
-numbers spelled the tabular way, no jargon, every toast string a sentence a photographer would say);
-focus and keyboard (Esc layers out one surface, focus returns to the invoking control and never
-falls to the body, every icon-only control has a tooltip carrying its key, ? lists it); cursor and
-hover (rest state carries the information, hover only adds, no hover-only affordance); states (an
-empty state is a verb, a wait under 200 ms shows nothing, a longer one shows a skeleton, an error
-says what to do); motion (frequency rule: a hundred-a-day act has no motion, tens-a-day 100-160 ms,
-an arriving surface 120-250 ms, ease-out, transform and opacity only, reduced-motion honoured);
-aria (one word per element; a live region for what changed). The harness shows you the surface:
-write a probe, run node scripts/harness_proof.mjs, read the PROBE line and the capture.`
+const BAR = `Walk this journey as a person would, in the harness (write probes, run node
+scripts/harness_proof.mjs, read the PROBE lines and the captures) and, where the engine is the
+question, with a Library on the development library. Count the steps, the waits, the moments of
+wondering what to do, the dead ends, the acts that lose state. The bar is what the owner named
+(09-12): "notion/factorio levels of polish and QoL UX". Concretely: an act is one key or one
+click; its effect is instant and visible; everything is remembered across a close and an open;
+everything is undoable and the undo says what it undid; every control teaches its key; no state
+is a dead end without a way on; the person is never asked what the app already knows. A finding
+is one moment on the journey that misses that bar, with the file and line that decides it and
+the smallest change that meets it. Not a feature. Not a redesign.`
 
-const SURFACES = [
-  { key: 'grid-and-shell', ask: `${CANON}\n\nSurface: the grid and the shell around it (web/static/v2/shell/app.js, lens/library.js, kit/virtual-grid.js, index.css): cells, day chapters, selection and the cursor, the top bar, the sort and size controls, the fold tabs, the status line.` },
-  { key: 'loupe', ask: `${CANON}\n\nSurface: the loupe (shell/loupe.js and its CSS): opening and closing, the zoom chip, arrows, the filmstrip, the key hints on first opens, what the inspector says beside it.` },
-  { key: 'rank', ask: `${CANON}\n\nSurface: Rank (shell/rank.js): the stage, the modes, the card sizes, a round, undo, Done, the count line.` },
-  { key: 'sidebar-albums-folders', ask: `${CANON}\n\nSurface: the sidebar (shell/albums.js, filters.js, the folder tree and drives in app.js): naming, renaming, the + control, the popovers, the counts, drag targets and what they say when they refuse.` },
-  { key: 'search-and-command', ask: `${CANON}\n\nSurface: the search box and drop (shell/searchcards.js and the search parts of app.js), the > command mode, saved searches, the chips.` },
-  { key: 'people-and-labels', ask: `${CANON}\n\nSurface: the People wall and the Same person? card (shell/people.js), Labels (shell/labels.js): naming, merging, undo, the chips, the empty states.` },
-  { key: 'import-and-dialogs', ask: `${CANON}\n\nSurface: the import workspace (shell/intake.js), the drive dialog, first run and the home chooser, Trash and Empty trash (shell/trash.js), the export dialog: every dialog's focus, Esc, copy, and its empty and error states.` },
-  { key: 'inspector-timeline-toasts', ask: `${CANON}\n\nSurface: the details inspector (the right panel in app.js), the timeline rail (shell/timeline.js, kit/days.js), toasts and the why-copy (kit/why.js, kit/words.js), the keyboard map (?).` },
+const JOURNEYS = [
+  { key: 'first-run', ask: `${BAR}\n\nJourney: the first afternoon. Open the app with an empty home, choose where the catalog lives, attach a folder, watch the sweep, see the first tiles arrive, make a first pick. Where does the person wait, and is the wait told; where do they wonder what to do next.` },
+  { key: 'the-cull', ask: `${BAR}\n\nJourney: a day's cull. A hundred photographs from one day: pick and reject through the grid and the loupe by keyboard alone, undo a mistake, compare two, see Best settle. Count keystrokes; every act that takes two where one would do; every place the cursor or the scroll is lost.` },
+  { key: 'the-rank-sitting', ask: `${BAR}\n\nJourney: a Rank sitting. Open Rank on a folder, change the size, play twenty rounds by keyboard, undo one, press Done, look at how Best changed. What is said between rounds, how quickly the next set paints, whether the sitting is remembered.` },
+  { key: 'finding-one', ask: `${BAR}\n\nJourney: finding one photograph. From everything to one: by a word, by a month on the timeline, by folder, by person, by label, by a saved search. Count the steps from ten thousand to one, and every dead end (an empty result with no way on, a filter that cannot be cleared where it was set).` },
+  { key: 'organising', ask: `${BAR}\n\nJourney: organising. Make an album, add to it from the grid by drag and by key, rename it, remove from it, delete it, undo that; label a set; the sidebar counts follow every act. Where the person is asked to confirm what undo already covers.` },
+  { key: 'the-second-sitting', ask: `${BAR}\n\nJourney: the second sitting. Close and reopen. Does the app come back where the person was: view, folder, sort, grid size, selection, scroll position, Rank size and mode, the loupe's zoom, the sidebar's folds. List every setting the app has and whether a close forgets it (kit/remembered.js is the mechanism).` },
+  { key: 'discoverability', ask: `${BAR}\n\nJourney: learning the app. For every action the UI can do (the bridge table in web/static/v2/net/index.js, the key map, the command mode), how would a person learn it exists: a tooltip carrying its key, the ? map, the > command mode. Diff the set of actions against what ? and the tooltips teach; every action nothing teaches is a finding.` },
+  { key: 'when-things-go-wrong', ask: `${BAR}\n\nJourney: when things go wrong. A drive that is away, a file that is gone, a file that will not decode, a sweep interrupted by a close, a home folder that is read-only. What the person is told, in what words, and whether they can carry on with everything else meanwhile.` },
 ]
 
-const result = await round(SURFACES, 8,
+const result = await round(JOURNEYS, 8,
   `A UI change is proven in the harness: write or adapt a probe under a temporary path (not in
 scripts/journeys unless it is a real task no probe covers), run node scripts/harness_proof.mjs,
 and paste the PROBE line and the capture path. The built document is what the window opens, so a
-change under web/static/v2/ is complete on its own; do not commit build/.`)
+change under web/static/v2/ is complete on its own; do not commit build/. Remembered state goes
+through kit/remembered.js, never a new store.`)
 return result

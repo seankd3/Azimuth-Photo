@@ -14,11 +14,14 @@ import { icon } from '../kit/icons.js';
 // The one vocabulary: what a field is called wherever it appears (the
 // menu, the editor's title), and what a stored value is called on a chip.
 const FIELD_LABEL = { stars: 'Stars', taken: 'Date taken', camera: 'Camera', status: 'Pick', orientation: 'Orientation', look: 'Look', person: 'Person', label: 'Label', alike: 'Alike', in: 'In album', folder: 'Folder', stack: 'Stack' };
-const VALUE_LABEL = { picked: 'Picked', unflagged: 'Unflagged', landscape: 'Landscape', portrait: 'Portrait', square: 'Square', color: 'Color', bw: 'Black & white', sepia: 'Sepia' };
+const VALUE_LABEL = { picked: 'Picked', unflagged: 'Unflagged', landscape: 'Wide (landscape)', portrait: 'Tall (portrait)', square: 'Square', color: 'Color', bw: 'Black & white', sepia: 'Sepia' };
 // The fields the + menu offers, and the ones an editor can change; a
 // folder or stack chip is lifted from the view and only ever removed.
 const OFFERED = ['stars', 'taken', 'camera', 'status', 'orientation', 'look', 'person', 'label', 'in'];
-const said = (value) => VALUE_LABEL[value] || value;
+// Exported so the search drop offers a shape in the words its chip will wear.
+// "Landscape" alone reads as a subject (the owner, 09-12: "Landscape photos vs
+// landscape orientation"); the shape word comes first, the camera word after.
+export const said = (value) => VALUE_LABEL[value] || value;
 
 export function createFilterBar({ product, read, update, onChange, undo = null }) {
   const bar = document.querySelector('[data-chips]');
@@ -307,5 +310,5 @@ export function createFilterBar({ product, read, update, onChange, undo = null }
     event.stopImmediatePropagation();
   });
 
-  return Object.freeze({ render, describe, close: closeEditor });
+  return Object.freeze({ render, describe, close: closeEditor, word: (chip) => say(chip, read()) });
 }

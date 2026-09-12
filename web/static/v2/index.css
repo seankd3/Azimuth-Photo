@@ -673,7 +673,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 4px 6px 4px 10px;
+  padding: 4px 8px 4px 10px;
   /* the pill is a span; its words and its × are the buttons */
   cursor: default;
   border: 1px solid var(--line-strong);
@@ -709,6 +709,11 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .chip .drop-chip {
   width: 16px;
   height: 16px;
+  /* a 16 px box holding a 16 px icon: no inherited button padding, or the
+     icon spills six pixels onto the pill's curved end (the owner, 09-12) */
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
   border: 0;
   border-radius: 50%;
   background: transparent;
