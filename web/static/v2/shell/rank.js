@@ -50,7 +50,9 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
 
   function remember(photos) {
     for (const photo of photos) state.recent.push(photo.hash);
-    const cap = Math.min(RECENT, Math.max(0, state.total - state.size * 2));
+    // The window never fences off what a set and two sets in hand need:
+    // past it the well ran dry in a small scope and the set shrank.
+    const cap = Math.min(RECENT, Math.max(0, state.total - state.size * 3));
     if (state.recent.length > cap) state.recent.splice(0, state.recent.length - cap);
   }
 
@@ -76,8 +78,10 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
     // keeps the decoded bitmap for an element that stays referenced.
     const image = new Image();
     image.decoding = 'async';
-    image.src = sourceFor(photo);
+    const source = sourceFor(photo);
+    image.src = source;
     photo.warm = image;
+    photo.warmFor = source;
     photo.ready = false;
     return image.decode().then(() => { photo.ready = true; }).catch(() => {});
   }
@@ -664,14 +668,15 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
       // the grid tile, with the wide loupe swapped in the moment its decode
       // lands. Nothing a pick shows waits on a 4,096 px decode.
       const want = sourceFor(photo);
-      const warmed = photo.warm && photo.warm.src === want && photo.ready;
+      const warmed = photo.warm && photo.warmFor === want && photo.ready;
       const image = warmed ? photo.warm : document.createElement('img');
       image.alt = '';
       image.decoding = 'async';
       if (!warmed) {
-        image.src = photo.tile || want;
-        if (want !== image.src) {
-          (photo.warm && photo.warm.src === want ? photo.warm.decode() : preload(photo))
+        const first = photo.tile || want;
+        image.src = first;
+        if (want !== first) {
+          (photo.warm && photo.warmFor === want ? photo.warm.decode() : preload(photo))
             .then(() => { if (image.isConnected) image.src = want; })
             .catch(() => {});
         }
