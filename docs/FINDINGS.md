@@ -825,6 +825,7 @@ finding was checked and the numbers said no.
 | X181 | The command line promised "Close the import panel" for a Cancel that discards the staging | the button's own words (Cancel / Back) are what the command line offers (X179) | shipped |
 | X182 | Size at its top end made a stage cell wider than the pane at the minimum window | a cell is never wider than the pane | shipped |
 | X183 | The loupe caption shared its band with the first-open hint | the caption keeps to its corner with a width; the hint yields while a merge is shown | shipped |
+| X184 | The grouped projection listed a key once per row that carried it, so two rows of one identity were written by two statements and counted twice (the suite's reindex test caught it; committed past a red suite, which is its own lesson) | each key once, in the rows' order | shipped |
 | X174 | `cache.evict` protects only the never-evict kinds it is handed; a caller with a partial tuple would have a never-evict kind's rows and files taken (the worker hands every kind, so unreachable today; the X166 test uses a partial tuple by fixture) | held: the worker is the one caller and is handed every kind | held |
 
 ## Refutation of D1-D5, PF4, PF5, E2-3 (2026-09-12, by a second model)

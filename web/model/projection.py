@@ -51,10 +51,12 @@ def project(conn, key: str, columns: Iterable[str], intended: dict, *,
     else:
         reads = (conn.execute(f"SELECT {key}, {listed} FROM images WHERE {key} IS NOT NULL"),)
     in_order: list[tuple] = []   # (key, wanted) as read: the rows' own order on disk
+    seen: set = set()            # one statement per key: two rows of one identity share it
     for read in reads:
         for row in read:
             wanted = intended.get(row[0])
-            if wanted is not None and tuple(row)[1:] != tuple(wanted):
+            if wanted is not None and tuple(row)[1:] != tuple(wanted) and row[0] not in seen:
+                seen.add(row[0])
                 differing.setdefault(tuple(wanted), []).append(row[0])
                 in_order.append((row[0], tuple(wanted)))
     # Rows that want the same values land in one statement per five
