@@ -3,6 +3,8 @@
 // toast holding the exact changes. There is no single/many fork — the reply
 // says which identities changed and what to, and the window applies it
 // whatever the count. Works the same over the grid and the loupe.
+import { count } from '../kit/words.js';
+
 export const CULL_MENU = Object.freeze([
   { action: 'pick', label: 'Pick — P' },
   { action: 'clear', label: 'Clear pick — U' },
@@ -12,9 +14,9 @@ export const CULL_MENU = Object.freeze([
 ]);
 
 const ACTIONS = Object.freeze({
-  pick: { call: (product, ids) => product.pick(ids), message: (n) => n === 1 ? 'Photograph picked.' : `${n} photographs picked.`, advance: true },
-  clear: { call: (product, ids) => product.clearPick(ids), message: (n) => n === 1 ? 'Pick cleared.' : `${n} picks cleared.`, advance: true },
-  reject: { call: (product, ids) => product.reject(ids), removes: true, message: (n) => n === 1 ? 'Photograph rejected.' : `${n} photographs rejected.` },
+  pick: { call: (product, ids) => product.pick(ids), message: (n) => n === 1 ? 'Photograph picked.' : `${count(n, 'photograph')} picked.`, advance: true },
+  clear: { call: (product, ids) => product.clearPick(ids), message: (n) => n === 1 ? 'Pick cleared.' : `${count(n, 'pick')} cleared.`, advance: true },
+  reject: { call: (product, ids) => product.reject(ids), removes: true, message: (n) => n === 1 ? 'Photograph rejected.' : `${count(n, 'photograph')} rejected.` },
   turnRight: { call: (product, ids) => product.turn(ids, 90), message: () => 'Turned right.' },
   turnLeft: { call: (product, ids) => product.turn(ids, 270), message: () => 'Turned left.' },
 });

@@ -13,6 +13,7 @@ import { why } from '../kit/why.js';
 import { columnsOf } from '../kit/days.js';
 import { emptyState } from '../lens/library.js';
 import { icon } from '../kit/icons.js';
+import { count } from '../kit/words.js';
 
 export function createPeoplePanel({ product, read, update, notify, undo, browse, renamed, ask }) {
   const section = document.querySelector('[data-people-section]');
@@ -106,7 +107,7 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
     leaf.className = 'leaf';
     leaf.textContent = left > 0
       ? `Introduce ${left} more…`
-      : `All ${held.length.toLocaleString()} ${held.length === 1 ? 'person' : 'people'}…`;
+      : `All ${count(held.length, 'person', 'people')}…`;
     door.append(icon('person'), leaf);
     door.addEventListener('click', () => update({ view: 'people', selected: null, selectedIndex: null }));
     rows.push(door);
@@ -193,7 +194,7 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
       look.type = 'button';
       look.className = 'face-card-look';
       look.title = `See ${entry.term}'s photographs`;
-      look.setAttribute('aria-label', `${entry.term}, about ${entry.count.toLocaleString()} photographs — see them`);
+      look.setAttribute('aria-label', `${entry.term}, about ${count(entry.count, 'photograph')} — see them`);
       look.tabIndex = index === cursor ? 0 : -1;
       look.addEventListener('focus', () => { cursor = index; markWall(false); });
       look.append(face(entry, 'face-card-face'));
@@ -201,15 +202,15 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
       const name = document.createElement('p');
       name.className = 'face-card-name';
       name.textContent = entry.term;
-      const count = document.createElement('p');
-      count.className = 'face-card-count';
-      count.textContent = `~${entry.count.toLocaleString()} photographs`;
+      const tally = document.createElement('p');
+      tally.className = 'face-card-count';
+      tally.textContent = `~${count(entry.count, 'photograph')}`;
       const call = document.createElement('button');
       call.type = 'button';
       call.className = 'quiet-button face-card-name-button';
       call.textContent = entry.settled ? 'Rename' : 'Name…';
       call.addEventListener('click', () => void introduce(entry.person, entry.term, entry.settled, call));
-      card.append(look, name, count, call);
+      card.append(look, name, tally, call);
       return card;
     }));
     if (inQuestion) (stage.querySelector('.same-card .primary-button') || stage.querySelector('.face-card-look'))?.focus({ preventScroll: true });

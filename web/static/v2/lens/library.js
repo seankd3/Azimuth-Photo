@@ -8,6 +8,7 @@ import {
   visibleGridRange,
 } from '../kit/virtual-grid.js';
 import { registerLens } from '../store/index.js';
+import { count } from '../kit/words.js';
 
 // The layout is a pure function of the width, the row height, and every
 // photograph's shape. Shapes arrive with the rows (width and height from the
@@ -244,7 +245,7 @@ function reconcileGrid(grid, state, actions, layout, range) {
       cell.dataset.missing = photo.placed ? '0' : '1';
       const { state: where, said } = presence(photo, cell.dataset.empty === '');
       const why = where === 'here' ? '' : `, ${said.replace(/[.…]$/, '')}`;
-      const stars = photo.stars > 0 ? `, ${photo.stars} star${photo.stars === 1 ? '' : 's'}` : '';
+      const stars = photo.stars > 0 ? `, ${count(photo.stars, 'star')}` : '';
       const stacked = photo.stack ? `, a stack of ${photo.stack + 1}` : '';
       cell.setAttribute('aria-label', `${picked ? 'Picked, ' : ''}${photo.tail || `Photo ${photo.id}`}${stars}${stacked}${why}`);
       cell.setAttribute('aria-pressed', String(Boolean(state.marked?.has(photo.id))));
@@ -435,7 +436,7 @@ function renderInspector(panel, selected, actions = {}) {
     const tally = { picked: 0, trashed: 0, unflagged: 0 };
     for (const p of rows) tally[p.status in tally ? p.status : 'unflagged'] += 1;
     const heading = element('div', 'inspector-heading');
-    heading.append(element('p', 'eyebrow', 'Selection'), element('h2', '', `${marked.size.toLocaleString()} photographs`));
+    heading.append(element('p', 'eyebrow', 'Selection'), element('h2', '', count(marked.size, 'photograph')));
     const facts = element('dl', 'facts');
     const said = [
       ['Loaded', rows.length < marked.size ? `${rows.length.toLocaleString()} of them on hand` : ''],
@@ -455,7 +456,7 @@ function renderInspector(panel, selected, actions = {}) {
     const drives = actions.drives || [];
     const glance = element('div', 'glance');
     const heading = element('div', 'inspector-heading');
-    heading.append(element('p', 'eyebrow', 'Library'), element('h2', '', `${(counts.photos || 0).toLocaleString()} photographs`));
+    heading.append(element('p', 'eyebrow', 'Library'), element('h2', '', count(counts.photos || 0, 'photograph')));
     const facts = element('dl', 'facts');
     // A zero is an answer: None and Empty are said, not left out. The
     // worker is an event, not a fact, so it appears only while it works.
@@ -483,7 +484,7 @@ function renderInspector(panel, selected, actions = {}) {
   const rounds = selected.rounds ?? null;
   const elo = Math.round(selected.elo || 1200);
   const score = rounds === null && elo === 1200 ? ''
-    : rounds ? `${elo.toLocaleString()} · ${rounds} round${rounds === 1 ? '' : 's'}`
+    : rounds ? `${elo.toLocaleString()} · ${count(rounds, 'round')}`
       : elo !== 1200 ? `${elo.toLocaleString()} · predicted`
         : 'Not ranked yet';
   // What the develop recipe holds: a crop, adjustments, or both.

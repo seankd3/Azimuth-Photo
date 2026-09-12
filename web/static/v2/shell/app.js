@@ -21,6 +21,7 @@ import { recall, remember } from '../kit/remembered.js';
 import { presence } from '../kit/presence.js';
 import { icon } from '../kit/icons.js';
 import { createTimeline } from './timeline.js';
+import { count } from '../kit/words.js';
 
 // A page is at least a viewport at the densest setting, so a 4K window
 // does not straddle three pages on every scroll frame; never past what the
@@ -301,7 +302,7 @@ async function teach(word, yes) {
     // refresh right behind it is authoritative: an excluded photograph
     // leaves the word's view as the key lands, not on the lane's rhythm.
     await product.teach(word, ids, yes);
-    const n = ids.length === 1 ? 'This photograph' : `${ids.length.toLocaleString()} photographs`;
+    const n = ids.length === 1 ? 'This photograph' : count(ids.length, 'photograph');
     notify(yes ? `${n} taught as “${word}”.` : `${n} taught as not “${word}”.`);
     void labelsPanel.refresh();
     await refreshInPlace();
@@ -695,7 +696,7 @@ function visibleGrid() {
         // The ghost says how many ride along, not just the cell under the cursor.
         const badge = document.createElement('div');
         badge.className = 'drag-badge';
-        badge.textContent = `${ids.length} photographs`;
+        badge.textContent = count(ids.length, 'photograph');
         document.body.append(badge);
         event.dataTransfer.setDragImage(badge, 18, 18);
         requestAnimationFrame(() => badge.remove());
@@ -892,7 +893,7 @@ async function refreshInPlace({ shelves = true, count = shelves } = {}) {
 let cardSaid = '';
 const COMES_BACK = (n) => (n === 1
   ? 'Forgotten. It comes back, with its decisions, if the file ever does.'
-  : `${n.toLocaleString()} missing photographs forgotten. They come back, with their decisions, if the files ever do.`);
+  : `${count(n, 'missing photograph')} forgotten. They come back, with their decisions, if the files ever do.`);
 const SAYING = { finding: 'Finding your photographs…' };
 const WORKING = {
   identity: 'Identifying photographs',
@@ -994,7 +995,7 @@ function openExportDialog() {
   exportDialog.querySelector('[data-quality-value]').textContent = quality.value;
   exportDialog.querySelector('[data-export-rename]').value = held.rename ?? '';
   exportDialog.querySelector('[data-export-count]').textContent =
-    `Export ${ids.length.toLocaleString()} photograph${ids.length === 1 ? '' : 's'}`;
+    `Export ${count(ids.length, 'photograph')}`;
   renameHint();
   exportDialog.showModal();
   exportDialog.querySelector('[type="submit"]').focus();
@@ -1027,7 +1028,7 @@ document.querySelector('[data-export-form]').addEventListener('submit', (event) 
   exportDialog.close();
   if (!ids.length) return;
   // Work in flight lives on the status line; the toast is for the outcome.
-  update({ doing: `Exporting ${ids.length.toLocaleString()} photograph${ids.length === 1 ? '' : 's'}…` });
+  update({ doing: `Exporting ${count(ids.length, 'photograph')}…` });
   product.exportPhotos(ids, quality, edge, rename).then((said) => {
     update({ doing: '' });
     if (!said.chosen) return;
@@ -1185,7 +1186,7 @@ async function restack(verb, ids) {
     if (!members.length) { notify(verb === 'stack' ? 'No burst around this frame — mark the frames and press S.' : 'Nothing here is stacked.'); return; }
     await refreshInPlace();
     const n = members.length;
-    undo.show(`${verb === 'stack' ? 'Stacked' : 'Unstacked'} ${n.toLocaleString()} photograph${n === 1 ? '' : 's'}.`, async () => {
+    undo.show(`${verb === 'stack' ? 'Stacked' : 'Unstacked'} ${count(n, 'photograph')}.`, async () => {
       if (verb === 'stack') await product.unstack([members[0]]);
       else await product.stack(members);
       await refreshInPlace();
@@ -1252,7 +1253,7 @@ async function scanDrive(drive) {
     await refreshInPlace();
     await loadFolders();
     notify(result.applied
-      ? `${result.photos_added.toLocaleString()} photograph${result.photos_added === 1 ? '' : 's'} added.`
+      ? `${count(result.photos_added, 'photograph')} added.`
       : result.reason || 'The folder could not be fully read.');
   } catch (error) {
     notify(why(error));
@@ -1569,10 +1570,10 @@ function renderChrome(state) {
   document.querySelector('[data-photo-count]').textContent = state.view === 'import'
     ? ''
     : state.view === 'people'
-      ? `${(state.people || []).length.toLocaleString()} people`
+      ? count((state.people || []).length, 'person', 'people')
       : state.view === 'library' && !seeking() && !(state.folders || []).length && !state.album && !(state.chips || []).length && state.counts.photos > state.total
-        ? `${state.total.toLocaleString()} photographs · ${(state.counts.photos - state.total).toLocaleString()} behind covers`
-        : `${state.total.toLocaleString()} photographs`;
+        ? `${count(state.total, 'photograph')} · ${(state.counts.photos - state.total).toLocaleString()} behind covers`
+        : count(state.total, 'photograph');
   document.querySelector('[data-sidebar-count]').textContent = count;
   document.querySelector('[data-trash-count]').textContent = state.counts.trash.toLocaleString();
   // The label speaks about the person's photographs, not the app's memory:

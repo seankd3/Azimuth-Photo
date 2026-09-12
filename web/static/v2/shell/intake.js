@@ -12,6 +12,7 @@
 import { why } from '../kit/why.js';
 import { recall, remember } from '../kit/remembered.js';
 import { title as dayName } from '../kit/days.js';
+import { count } from '../kit/words.js';
 
 export function createIntakeWorkflow({ product, notify, afterImport, progressed = () => {}, enter, leave, isShown, offer = () => {} }) {
   const title = document.querySelector('[data-import-title]');
@@ -70,7 +71,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
       try {
         const held = await product.intakeStatus();
         if (held.phase === 'staging' && held.seen) {
-          progressed(`Looking at ${source} — ${held.seen.toLocaleString()} photographs…`);
+          progressed(`Looking at ${source} — ${count(held.seen, 'photograph')}…`);
         }
       } catch { /* the count is a courtesy; the stage call itself reports */ }
     }, 600);
@@ -96,7 +97,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     state.running = false;
     state.checked = new Set(staged.candidates.filter((c) => !c.suspect).map((c) => c.key));
     title.textContent = isCard ? 'Import from card' : 'Import folder';
-    sourceLine.textContent = `${staged.source} — ${staged.candidates.length.toLocaleString()} photographs` +
+    sourceLine.textContent = `${staged.source} — ${count(staged.candidates.length, 'photograph')}` +
       (staged.receiving ? `, into ${staged.receiving}` : '');
     // Remembered per kind of source: a Move learned on a card must never
     // reach a folder on the working disk.
@@ -282,14 +283,14 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     // The stage's own day rows are the picker; the panel says the span.
     const dated = [...byDay.keys()].filter(Boolean).sort();
     destinations.textContent = dated.length
-      ? `${dated.length === 1 ? 'One day' : `${dated.length} days`} · ${dayTitle(dated[0])}${dated.length > 1 ? ` – ${dayTitle(dated.at(-1))}` : ''}`
+      ? `${count(dated.length, 'day')} · ${dayTitle(dated[0])}${dated.length > 1 ? ` – ${dayTitle(dated.at(-1))}` : ''}`
       : '';
     // The destination said once, as the rule it is — every row repeating
     // the root was noise wearing a path.
     document.querySelector('[data-import-into]').textContent =
       state.kind ? `into ${state.roots[state.kind]}, by date` : 'Choose what these are first.';
     const skipped = state.candidates.length - state.checked.size;
-    summary.textContent = `${state.checked.size.toLocaleString()} photographs (${(bytes / 1e9).toFixed(2)} GB)` +
+    summary.textContent = `${count(state.checked.size, 'photograph')} (${(bytes / 1e9).toFixed(2)} GB)` +
       (skipped ? ` · ${skipped.toLocaleString()} left out` : '');
     startButton.disabled = !state.kind || state.checked.size === 0 || state.running;
   }

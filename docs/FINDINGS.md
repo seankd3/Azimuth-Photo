@@ -750,3 +750,9 @@ finding was checked and the numbers said no.
 | PN2 | No merge | full-resolution merge through the detailed stitching API reusing the detection's bundle adjustment: projection by field of view, blocks-gain before the seams, graph-cut seams, multi-band blend, auto-crop with the canvas kept; a 16-bit TIFF that becomes the stack's cover | open |
 | PN3 | A merge that is not a photograph | the raw path: linear demosaic, stitched in linear light, a linear DNG with the first frame's metadata and a sidecar naming the members; boundary-warp edge recovery as one slider | open |
 
+## Details (the thousand small things, 2026-09-12)
+
+| # | Finding | Fix | Status |
+|---|---|---|---|
+| D1 | Thirteen lines could read "1 photographs" (the drag badge, the sidebar count, the import source and summary, a person's count, the search-kept notice, Empty Trash's notice, the selection heading); twenty more spelled their own plural | one word in the kit, `count(n, one, many)`, used by every surface that says how many | shipped |
+

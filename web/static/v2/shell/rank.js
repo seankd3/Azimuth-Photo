@@ -24,6 +24,7 @@ const ASPECT_MAX = 2.6;
 import { why } from '../kit/why.js';
 import { emptyState } from '../lens/library.js';
 import { recall, remember as keep } from '../kit/remembered.js';
+import { count } from '../kit/words.js';
 
 export function createRankWorkflow({ product, read, update, notify, undo, cull, onLeave, onLook, viewOf, describe, say = () => {} }) {
   const stage = document.querySelector('[data-rank]');
@@ -586,7 +587,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
     const ranked = state.total
       ? `${state.earned.toLocaleString()} sorted · ${state.judged.toLocaleString()} seen of ${state.total.toLocaleString()} in ${where}`
       : '';
-    const sitting = state.rounds ? ` · ${state.rounds} round${state.rounds === 1 ? '' : 's'} this sitting` : '';
+    const sitting = state.rounds ? ` · ${count(state.rounds, 'round')} this sitting` : '';
     const label = document.querySelector('[data-rank-progress]');
     if (label) label.textContent = ranked + sitting;
     for (const button of document.querySelectorAll('[data-rank-size] button')) {

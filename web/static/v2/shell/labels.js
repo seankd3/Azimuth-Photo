@@ -6,6 +6,7 @@ import { why } from '../kit/why.js';
 import { showMenu, hideMenu } from '../kit/menu.js';
 import { acceptDrops } from '../kit/drop.js';
 import { icon } from '../kit/icons.js';
+import { count } from '../kit/words.js';
 
 export function createLabelsPanel({ product, update, browse, ask, notify, undo }) {
   const section = document.querySelector('[data-labels-section]');
@@ -96,7 +97,7 @@ export function createLabelsPanel({ product, update, browse, ask, notify, undo }
       try {
         await product.teach(row.dataset.term, ids, true);
         await refresh();
-        notify(`${ids.length === 1 ? 'This photograph' : `${ids.length.toLocaleString()} photographs`} taught as “${row.dataset.term}”.`);
+        notify(`${ids.length === 1 ? 'This photograph' : count(ids.length, 'photograph')} taught as “${row.dataset.term}”.`);
       } catch (error) {
         notify(why(error));
       }

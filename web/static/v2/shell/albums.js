@@ -9,6 +9,7 @@ import { acceptDrops } from '../kit/drop.js';
 import { why } from '../kit/why.js';
 import { showMenu, hideMenu } from '../kit/menu.js';
 import { icon } from '../kit/icons.js';
+import { count } from '../kit/words.js';
 
 export function createAlbumsPanel({ product, read, update, notify, undo, reload, moved, selection, describe, viewOf }) {
   const tree = document.querySelector('[data-albums-tree]');
@@ -206,7 +207,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
       await refresh();
       notify(answered.total > kept.kept
         ? `“${name}” keeps the top ${kept.kept.toLocaleString()} of ${answered.total.toLocaleString()} results.`
-        : `“${name}” keeps ${kept.kept.toLocaleString()} photographs from this search.`);
+        : `“${name}” keeps ${count(kept.kept, 'photograph')} from this search.`);
     } catch (error) {
       notify(why(error));
     }
@@ -217,7 +218,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
       const moved = await product.quick(ids);
       await refresh();
       if (read().album === 'quick') await reload();
-      const word = (n) => `${n.toLocaleString()} photograph${n === 1 ? '' : 's'}`;
+      const word = (n) => count(n, 'photograph');
       notify('added' in moved
         ? `${word(moved.added)} added to Quick album — ${moved.count.toLocaleString()} there now.`
         : `${word(moved.removed)} out of Quick album — ${moved.count.toLocaleString()} there now.`);
@@ -239,7 +240,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
       const out = await product.removeFromAlbum(here.id, ids);
       await refresh();
       await reload();
-      const word = `${out.removed.toLocaleString()} photograph${out.removed === 1 ? '' : 's'}`;
+      const word = count(out.removed, 'photograph');
       notify(here.smart
         ? `${word} excluded from “${here.name}”.`
         : `${word} out of “${here.name}”.`);
@@ -255,7 +256,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
       const name = (read().albums.find((c) => c.id === id) || {}).name || 'the album';
       // A drop into the wrong album has the same way back as every other
       // change to a set.
-      undo.show(`${added.added.toLocaleString()} photograph${added.added === 1 ? '' : 's'} added to “${name}”.`, async () => {
+      undo.show(`${count(added.added, 'photograph')} added to “${name}”.`, async () => {
         await product.removeFromAlbum(id, ids);
         await refresh();
         if (read().album === id) await reload();
@@ -306,7 +307,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
         const name = await prompt('Rename to', row || tree, current, { not: albumNames().filter((n) => n !== current) });
         if (name) {
           const renamed = await product.renameAlbum(id, name);
-          notify(`“${current}” renamed to “${name}”.${renamed?.followed ? ` ${renamed.followed} album${renamed.followed === 1 ? '' : 's'} under it followed.` : ''}`);
+          notify(`“${current}” renamed to “${name}”.${renamed?.followed ? ` ${count(renamed.followed, 'album')} under it followed.` : ''}`);
         }
       }
       if (action === 'freeze-album') {
