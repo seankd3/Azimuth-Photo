@@ -1,11 +1,11 @@
 export const meta = {
-  name: 'latency',
-  description: 'Trace each click-to-paint path and find what makes it wait; measure, then fix what is real',
-  whenToUse: 'Enforcing the speed covenant mechanically: nothing a person asked for waits on a lock, a decode, a scan, or an empty buffer.',
+  name: 'polish',
+  description: 'Audit every surface against the UI canon, refute the weak findings, fix what survives',
+  whenToUse: 'The polish round: copy, focus, cursor, hover, empty and error states, keys, units, plurals, motion, aria, one surface per scout. Run it repeatedly.',
   phases: [
-    { title: 'Survey', detail: 'one agent per interactive path' },
-    { title: 'Refute', detail: 'measure the stall rather than assert it' },
-    { title: 'Fix', detail: 'one worktree per real stall, numbers before and after' },
+    { title: 'Survey', detail: 'one scout per surface, against the canon' },
+    { title: 'Refute', detail: 'try to kill each finding before believing it' },
+    { title: 'Fix', detail: 'one worktree per surviving finding, harness-proven' },
   ],
 }
 const HOUSE = `
@@ -177,32 +177,31 @@ async function round(scouts, perRound, fixExtra) {
   }
 }
 
-const SPEED = `The speed covenant (docs/ui-architecture.md): a keystroke in the cull loop paints in the same
-frame, under 50 ms, never past 100; next photograph in the loupe paints something under 100 ms;
-a scope switch keeps the last answer until the next lands; a search answers under 1 s; the grid at
-150k is virtualized; one bridge call per act; work proportional to what is shown, never to the
-library. You are tracing INTERACTIVE paths: a person has acted and is waiting. Background work is
-out of scope. Follow a path from the event handler in web/static/v2/ through net/index.js to the
-verb in web/desktop.py and the Library in web/boot.py to the first paint. Look for: awaiting a lock,
-a decode or a scan before the first paint; a buffer that empties faster than it refills; a fixed
-delay longer than its purpose; work proportional to library size; a cache checked after the
-expensive call; a sequential loop of bridge calls that could be one; an await inside a loop over
-visible items; a query without the index it needs (EXPLAIN QUERY PLAN says SCAN). Measure: a
-Library on the fixture for correctness, and for scale a catalog with 150,000 rows -- copy the
-fixture's catalog and insert synthetic image rows following web/model/schema.sql, then
-scripts/bench.py on it. Report both cold and warm numbers; compare back to back on this machine.`
+const CANON = `Judge against docs/ui-architecture.md, section by section: copy (the vocabulary, plurals,
+numbers spelled the tabular way, no jargon, every toast string a sentence a photographer would say);
+focus and keyboard (Esc layers out one surface, focus returns to the invoking control and never
+falls to the body, every icon-only control has a tooltip carrying its key, ? lists it); cursor and
+hover (rest state carries the information, hover only adds, no hover-only affordance); states (an
+empty state is a verb, a wait under 200 ms shows nothing, a longer one shows a skeleton, an error
+says what to do); motion (frequency rule: a hundred-a-day act has no motion, tens-a-day 100-160 ms,
+an arriving surface 120-250 ms, ease-out, transform and opacity only, reduced-motion honoured);
+aria (one word per element; a live region for what changed). The harness shows you the surface:
+write a probe, run node scripts/harness_proof.mjs, read the PROBE line and the capture.`
 
-const PATHS = [
-  { key: 'grid-paint-scroll', ask: `${SPEED}\n\nPath: opening the app to the first grid; scrolling it; the page cache (kit/page-cache.js) and virtual grid; changing scope from the sidebar; the days and folders answers.` },
-  { key: 'cull-loop', ask: `${SPEED}\n\nPath: the cull loop: P, X, R, U, arrows, a turn, a stack; what each keystroke awaits before the tile shows its answer; undo.` },
-  { key: 'loupe-and-tiles', ask: `${SPEED}\n\nPath: opening the loupe, arrowing, zoom; the tile store and the worker's on-screen-first order (work.py look/step), what the window waits on for a rendition.` },
-  { key: 'rank-and-search', ask: `${SPEED}\n\nPath: a Rank round (rank.py, the draws), search as you type (search.py, the facets), saving a search.` },
-  { key: 'sidebar-and-facets', ask: `${SPEED}\n\nPath: the folder tree, facets, people and albums answers (boot.folders, facets_of, the refacet on the sweep lane), and the pulse: what a sweep or a cull makes the window re-read.` },
-  { key: 'import-stage', ask: `${SPEED}\n\nPath: staging a card (intake.scan on the intake lane) and bringing photographs in (intake.bring): what the stage waits on before the first row shows, thumbs, the count.` },
+const SURFACES = [
+  { key: 'grid-and-shell', ask: `${CANON}\n\nSurface: the grid and the shell around it (web/static/v2/shell/app.js, lens/library.js, kit/virtual-grid.js, index.css): cells, day chapters, selection and the cursor, the top bar, the sort and size controls, the fold tabs, the status line.` },
+  { key: 'loupe', ask: `${CANON}\n\nSurface: the loupe (shell/loupe.js and its CSS): opening and closing, the zoom chip, arrows, the filmstrip, the key hints on first opens, what the inspector says beside it.` },
+  { key: 'rank', ask: `${CANON}\n\nSurface: Rank (shell/rank.js): the stage, the modes, the card sizes, a round, undo, Done, the count line.` },
+  { key: 'sidebar-albums-folders', ask: `${CANON}\n\nSurface: the sidebar (shell/albums.js, filters.js, the folder tree and drives in app.js): naming, renaming, the + control, the popovers, the counts, drag targets and what they say when they refuse.` },
+  { key: 'search-and-command', ask: `${CANON}\n\nSurface: the search box and drop (shell/searchcards.js and the search parts of app.js), the > command mode, saved searches, the chips.` },
+  { key: 'people-and-labels', ask: `${CANON}\n\nSurface: the People wall and the Same person? card (shell/people.js), Labels (shell/labels.js): naming, merging, undo, the chips, the empty states.` },
+  { key: 'import-and-dialogs', ask: `${CANON}\n\nSurface: the import workspace (shell/intake.js), the drive dialog, first run and the home chooser, Trash and Empty trash (shell/trash.js), the export dialog: every dialog's focus, Esc, copy, and its empty and error states.` },
+  { key: 'inspector-timeline-toasts', ask: `${CANON}\n\nSurface: the details inspector (the right panel in app.js), the timeline rail (shell/timeline.js, kit/days.js), toasts and the why-copy (kit/why.js, kit/words.js), the keyboard map (?).` },
 ]
 
-const result = await round(PATHS, 6,
-  `A performance change ships with its number: paste the measurement before and after, from the same
-run of scripts/bench.py or the same timing script, on the same catalog. If the number did not move,
-applied=false.`)
+const result = await round(SURFACES, 8,
+  `A UI change is proven in the harness: write or adapt a probe under a temporary path (not in
+scripts/journeys unless it is a real task no probe covers), run node scripts/harness_proof.mjs,
+and paste the PROBE line and the capture path. The built document is what the window opens, so a
+change under web/static/v2/ is complete on its own; do not commit build/.`)
 return result
