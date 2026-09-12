@@ -156,7 +156,7 @@ async function round(scouts, perRound, fixExtra) {
           `person relies on; the claim rests on a misreading; docs/FINDINGS.md already closed or rejected ` +
           `it with a reason; or the cost outweighs what a photographer would notice. Read the code; run ` +
           `the harness or a Library if that settles it. Do not edit any file.`,
-        { label: `refute:${f.file.split('/').pop()}:${f.line}`, phase: 'Refute', schema: VERDICT },
+        { label: `refute:${f.file.split('/').pop()}:${f.line}`, phase: 'Refute', schema: VERDICT, model: 'sonnet', effort: 'high' },
       ).then((v) => ({ finding: f, verdict: v })),
     (checked) => {
       if (!checked || !checked.verdict || checked.verdict.refuted) return checked
@@ -167,7 +167,9 @@ async function round(scouts, perRound, fixExtra) {
           `Add a refuter when one can exist (a test that fails before and passes after), keep the change ` +
           `to what the finding needs, and write the FINDINGS.md row for it in your answer rather than ` +
           `editing that file.`,
-        { label: `fix:${f.file.split('/').pop()}`, phase: 'Fix', schema: OUTCOME, isolation: 'worktree' },
+        // The strong model reads the whole round's diff once before it merges; per-finding
+        // work runs on Sonnet at high effort, which is where the budget goes furthest.
+        { label: `fix:${f.file.split('/').pop()}`, phase: 'Fix', schema: OUTCOME, isolation: 'worktree', model: 'sonnet', effort: 'high' },
       ).then((out) => ({ ...checked, outcome: out }))
     },
   )
