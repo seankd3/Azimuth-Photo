@@ -28,6 +28,11 @@ nothing extra: InsightFace ships in `requirements-v2.txt` and runs on the CPU.
 .\scripts\start_azimuth_windows.ps1 -DataRoot C:\some\empty  # an isolated home
 ```
 
+The app as its own program -- `Azimuth Photo.exe` in Task Manager, the compass
+on the taskbar, a version in Properties -- is `scripts/make_launcher.py`: it
+makes the exe in `web/.venv/Scripts/` and points the Desktop and Start Menu
+shortcuts at it. Run it again after the venv is rebuilt.
+
 The launcher rebuilds the document, then opens `web/desktop.py`. **Edits under
 `web/static/v2/` are invisible until the document is rebuilt**; the window
 loads one file, not the source tree:

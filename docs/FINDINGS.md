@@ -697,9 +697,9 @@ finding was checked and the numbers said no.
 | PW4 | The rail marked months only | every day with photographs leaves a hairline, longer the fuller the day; the word under the hand says the day and how many | shipped |
 | PW5 | The fold tabs floated mid-height on the seams and a lid hung under the search box | the sidebar's and top bar's tabs share the workspace's top-left corner on the bar row; the inspector's sits on its seam at the same height; a hidden panel's tab waits where it was | shipped |
 | PK1 | A console window titled with python.exe's path appeared while he worked | it was the headless UI harness's stub server run from this session, not the app; stopped | closed |
-| PK2 | Task Manager and the taskbar said python | a launcher `Azimuth Photo.exe` in the venv (the interpreter's own launcher wearing the app's icon, name and version), the shortcut pointing at it; the frozen build named and versioned the same way | open |
-| IM1 | The import dialog offers no Copy or Move | Move = the copy verified, then the source removed (what `clear_source` already does), as the dialog's own choice | open |
-| IM2 | A photograph culled before comes back on every re-import | the decision log already holds the cull by identity: a culled identity stays out by default, the import says how many, one click brings them anyway | open |
+| PK2 | Task Manager and the taskbar said python | `scripts/make_launcher.py`: a copy of the base pythonw.exe beside the venv's pyvenv.cfg (the venv's own pythonw is a redirector that starts the base interpreter as a child, which is why it said python), wearing the compass and a version resource; runs the checkout in-process as "Azimuth Photo"; the Desktop and Start Menu shortcuts point at it | shipped |
+| IM1 | The import dialog offers no Copy or Move | Copy / Move as the dialog's own choice, remembered; Move takes each file only after its copy is verified, and the line under it says so | shipped |
+| IM2 | A photograph culled before comes back on every re-import | the decision log already holds the cull by identity (Empty Trash keeps the log), so nothing new is written down: a culled identity that no drive holds stays out, the import says how many, and one button brings them anyway; a test culls, empties, re-imports | shipped |
 
 ## Taste and sharpness program (2026-09-10, from docs/taste-and-culling-research.md)
 
