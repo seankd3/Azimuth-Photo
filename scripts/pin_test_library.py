@@ -40,13 +40,14 @@ AGENT = {"User-Agent": "azimuth-photo/test-library"}
 TILE = "https://tile.loc.gov/storage-services/service/pnp/"
 
 # collection slug, how many, the root (or Film Scans with a roll), photographer when the
-# record names an organisation instead of a person.
+# record names an organisation instead of a person, and the years to sample by when the
+# collection is too deep to page through (the API refuses pages past about a thousand).
 COLLECTIONS = (
-    ("fsa-owi-color-photographs", 1700, "split", "", None),
-    ("fsa-owi-black-and-white-negatives", 2400, "split", "", None),
-    ("detroit-publishing-company", 1200, "Raws/Film Scans", "Detroit Publishing", "Detroit Publishing Co."),
-    ("bain", 800, "Raws/Film Scans", "Bain News Service", "Bain News Service"),
-    ("harris-ewing", 800, "Raws/Film Scans", "Harris & Ewing", "Harris & Ewing"),
+    ("fsa-owi-color-photographs", 1700, "split", "", None, ()),
+    ("fsa-owi-black-and-white-negatives", 2400, "split", "", None, tuple(range(1935, 1945))),
+    ("detroit-publishing-company", 1200, "Raws/Film Scans", "Detroit Publishing", "Detroit Publishing Co.", ()),
+    ("bain", 800, "Raws/Film Scans", "Bain News Service", "Bain News Service", ()),
+    ("harris-ewing", 800, "Raws/Film Scans", "Harris & Ewing", "Harris & Ewing", ()),
 )
 MONTHS = {m: i + 1 for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"))}
 PER_PAGE = 100
@@ -65,29 +66,40 @@ def get(url: str, tries: int = 4) -> bytes:
     raise RuntimeError(f"{url}: {failure}")
 
 
-def pages(slug: str) -> int:
-    first = json.loads(get(f"https://www.loc.gov/collections/{slug}/?fo=json&c={PER_PAGE}&fa=online-format:image"))
-    return int(first["pagination"]["total"])
+def listing(slug: str, facet: str, page: int) -> dict:
+    return json.loads(get(f"https://www.loc.gov/collections/{slug}/?fo=json&c={PER_PAGE}&sp={page}"
+                          f"&fa=online-format:image{facet}"))
 
 
-def sample(slug: str, wanted: int) -> list[dict]:
-    """Items spread across the collection: every k-th page, whole pages, so
-    consecutive frames stay together."""
+def sample(slug: str, wanted: int, years: tuple[int, ...]) -> list[dict]:
+    """Items spread across the collection: whole pages, so consecutive frames
+    stay together, every k-th page across the span -- or, for a collection
+    too deep to page, the first pages of each year."""
 
-    total = pages(slug)
-    need = max(1, -(-wanted // PER_PAGE))
-    step = max(1, total // need)
+    facets = [f"|dates:{year}" for year in years] or [""]
+    share = -(-wanted // len(facets))
     chosen: list[dict] = []
-    for page in range(1, total + 1, step):
-        if len(chosen) >= wanted:
-            break
+    for facet in facets:
         time.sleep(0.6)   # the Library asks for a gentle pace on its API
-        body = json.loads(get(f"https://www.loc.gov/collections/{slug}/?fo=json&c={PER_PAGE}&sp={page}&fa=online-format:image"))
-        for rank, result in enumerate(body.get("results", [])):
-            row = record(result, rank)
-            if row is not None:
-                chosen.append(row)
-        print(f"  {slug}: page {page}/{total}, {len(chosen)} so far", file=sys.stderr)
+        total = int(listing(slug, facet, 1)["pagination"]["total"])
+        need = max(1, -(-share // PER_PAGE))
+        step = max(1, min(total, 1000) // need) if not years else 1
+        taken = 0
+        for page in range(1, min(total, 1000) + 1, step):
+            if taken >= share:
+                break
+            time.sleep(0.6)
+            try:
+                body = listing(slug, facet, page)
+            except RuntimeError as error:   # one page refused is not the collection lost
+                print(f"  {slug}{facet}: page {page} skipped: {error}", file=sys.stderr)
+                continue
+            for rank, result in enumerate(body.get("results", [])):
+                row = record(result, rank)
+                if row is not None:
+                    chosen.append(row)
+                    taken += 1
+            print(f"  {slug}{facet}: page {page}/{total}, {len(chosen)} so far", file=sys.stderr)
     return chosen[:wanted]
 
 
@@ -169,9 +181,9 @@ def main() -> int:
     known = {row["id"] for row in small}
 
     rows: list[dict] = []
-    for slug, wanted, root, roll, org in COLLECTIONS:
+    for slug, wanted, root, roll, org, years in COLLECTIONS:
         print(f"{slug}: sampling {wanted}", file=sys.stderr)
-        for row in sample(slug, wanted):
+        for row in sample(slug, wanted, years):
             if row["id"] in known:
                 continue
             known.add(row["id"])
