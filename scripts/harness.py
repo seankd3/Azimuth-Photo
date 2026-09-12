@@ -67,7 +67,12 @@ STUB = r"""<script>
     trash_photos: () => [], trash_count: () => 0,
     days: (view) => days.map((d, i) => (i === 0 ? { ...d, count: d.count + shown(view).length - N } : d)),
     sessions: () => [],
-    albums: () => [], cameras: () => [], facets: () => ({}), labels: () => [], cards: () => [],
+    albums: () => [], cameras: () => [{ model: 'EOS R5', photos: N }], labels: () => [], cards: () => [],
+    // The library's shape in the verb's own four lists, so the search drop
+    // offers what a real catalog would; an empty object left it offering
+    // nothing and no probe could see the shape words.
+    facets: () => ({ years: [{ year: '2026', photos: N }], cameras: [{ model: 'EOS R5', photos: N }],
+      orientations: [{ orientation: 'landscape', photos: N }], roots: [{ folder: 'Raws', photos: N }] }),
     people: () => [{ term: 'Someone 1', count: 14, settled: false, person: 'h1:0', samples: [] }, { term: 'Ada', count: 40, settled: true, person: 'h2:0', samples: [] }],
     teach: (word, ids) => ({ word, taught: ids.length }), faces: () => [[0.4, 0.3, 0.2, 0.25]], rename_label: (word, called) => ({ id: 'l1', word: called }),
     forget_label: () => ({ id: 'l1' }), remember_album: () => true,
