@@ -77,11 +77,13 @@ Both read [`AGENTS.md`](../AGENTS.md) and run the same check, so a change is
 held to one standard whichever agent made it. What a cloud session has and
 does:
 
-- The setup above, on Linux, with `python3.12` named outright (the
-  container's default `python3` may be older), then
+- `scripts/cloud-setup`: the setup above on Linux (Python 3.12 named
+  outright, since the container's default may be older), `npm install`, and
   `python scripts/make_test_library.py`, which builds the development archive
-  from public-domain photographs in seconds. Nothing of the owner's archive is
-  needed or reachable.
+  from public-domain photographs in seconds. A Claude Code session runs it
+  before the first prompt (`.claude/hooks/session-start.sh`); a Codex
+  environment names it as its setup script. Nothing of the owner's archive
+  is needed or reachable.
 - `./scripts/azimuth-check`, the same check as on Windows; with no desktop it
   builds the document instead of opening it. CI runs it on both platforms.
 - No window. A UI change is proven in the harness (`scripts/harness.py`) and

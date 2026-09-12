@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Make a fresh Linux container able to run the check and the app's engine:
+# the venv on Python 3.12, the UI build dependency, and the development
+# library. Safe to run again; each step is skipped or a no-op once done.
+#
+#   scripts/cloud-setup
+#
+# A Claude Code cloud session runs it from .claude/hooks/session-start.sh;
+# a Codex environment names it as its setup script. One script, both clouds.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+PYTHON="$(command -v python3.12 || command -v python3)"
+[[ -x web/.venv/bin/python ]] || "$PYTHON" -m venv web/.venv
+web/.venv/bin/python -m pip install --quiet -r web/requirements-v2.txt -r web/requirements-dev.txt
+npm install --no-audit --no-fund --silent
+web/.venv/bin/python scripts/make_test_library.py
+echo "cloud-setup: ok"
