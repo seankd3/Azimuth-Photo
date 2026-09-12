@@ -41,6 +41,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import hashlib
+import http.client
 import io
 import os
 import shutil
@@ -180,7 +181,7 @@ def fetch(digital_id: str, sha256: str) -> bytes:
         try:
             with urllib.request.urlopen(request, timeout=60) as response:
                 data = response.read()
-        except OSError as error:
+        except (OSError, http.client.HTTPException) as error:   # a cut body is the latter
             failure = str(error)
             continue
         if hashlib.sha256(data).hexdigest() == sha256:
@@ -374,10 +375,17 @@ def main() -> int:
     dest = Path(args.dest or os.environ.get("AZIMUTH_TEST_LIBRARY")
                 or Path.home() / "Azimuth Test" / "Photos")
 
+    # PROVENANCE.md is written last, so its presence means the whole library
+    # is there; a folder without it is a build that stopped short, or not
+    # this script's at all -- which --reset must never remove.
+    built = dest / "PROVENANCE.md"
     if args.reset and dest.exists():
+        if not built.is_file():
+            print(f"{dest} was not built by this script; leaving it alone", file=sys.stderr)
+            return 1
         shutil.rmtree(dest)
         print(f"removed {dest}")
-    if dest.exists():
+    if built.is_file():
         print(f"{dest} is already built; --reset throws it away and rebuilds")
         return 0
 
