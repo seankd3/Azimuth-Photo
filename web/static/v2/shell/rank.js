@@ -572,8 +572,17 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
   }
 
   function renderSelection() {
+    // Ring, border and speech travel together: the cursor card says
+    // aria-current (the one aria word the keyboard's cursor says), and when
+    // the keyboard is already on the stage the focus moves with it.
+    let cursor = null;
     for (const card of stage.querySelectorAll('.rank-card')) {
-      card.classList.toggle('is-selected', Number(card.dataset.index) === state.selected);
+      const on = Number(card.dataset.index) === state.selected;
+      card.classList.toggle('is-selected', on);
+      if (on) { card.setAttribute('aria-current', 'true'); cursor = card; } else card.removeAttribute('aria-current');
+    }
+    if (cursor && stage.contains(document.activeElement) && document.activeElement !== cursor) {
+      cursor.focus({ preventScroll: true });
     }
   }
 
@@ -635,7 +644,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
     stage.replaceChildren(...state.set.map((photo, index) => {
       const card = document.createElement('button');
       card.type = 'button';
-      card.className = 'rank-card' + (index === state.selected ? ' is-selected' : '');
+      card.className = 'rank-card';
       card.dataset.index = index;
       card.dataset.turn = photo.rotate || 0;
       card.setAttribute('aria-label', `Pick ${photo.tail.split('/').pop()}`);
@@ -649,6 +658,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
       return card;
     }));
     layout();
+    renderSelection();
     renderProgress();
     // The keyboard stays on the stage: a rebuilt set focuses its cursor.
     if (document.activeElement === document.body || stage.contains(document.activeElement)) {
