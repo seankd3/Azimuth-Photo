@@ -5,6 +5,8 @@ import tempfile
 import time
 import unittest
 from unittest.mock import patch
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 from PIL import Image
 
@@ -112,7 +114,7 @@ class DesktopTests(unittest.TestCase):
             finally:
                 product.close()
 
-            tile_path = tiled[0]["tile"].removeprefix("file:///")
+            tile_path = url2pathname(urlparse(tiled[0]["tile"]).path)
             tile_magic = open(tile_path, "rb").read(3)
             renamed = catalog + ".closed"
             os.replace(catalog, renamed)

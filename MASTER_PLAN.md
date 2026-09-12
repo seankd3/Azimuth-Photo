@@ -444,6 +444,15 @@ goal — it is permission to stop.
 - `open` "keep working un attended till morning" — 09-12 02:12 · yes; the night ran to b2e654d5 (34 commits: PN4, BC13 second round, X129–X192, IA1–IA19, LR1–LR23).
 - `open` "keep going" — 09-12 06:55 · yes: the rounds continue (audit, refute, prove, push); PN2 (the full-size merge as a stack cover) is designed in daylight with his eyes on the first result.
 
+### 1.20 Working from the phone (09-12)
+
+- `open` "This is a whole nightmare I just want it to be all fixed and everything set up so I can work on it from my phone without my laptop on but GitHub integrations are a nightmare on Claude" — 09-12 · said in the chat that moved the repository to `seankd3/Azimuth-Photo` after the old account was flagged; the whole tree was pushed there the same day, and the cloud workflow below is the rest of the ask.
+- `open` "setup a clean and elegant workflow for working on the app in the cloud." — 09-12 · the shape: a task from the phone runs in a Linux container, builds the development archive from public-domain photographs, runs the one check, and comes back as a branch and a draft pull request to merge from the phone; CI runs the check on Linux and Windows both. Written down once, in `docs/development.md` (Cloud sessions) and the cloud-session exception in `AGENTS.md`.
+- `open` "I want to continue development from my phone using Claude code and astra" — 09-12 · Claude Code on the web is the tool the workflow is built for; "astra" is not recognised and is asked about.
+- `open` "Astra is gpt-6" — 09-12 · the answer: the second agent is Codex. The workflow is agent-neutral by construction -- `AGENTS.md` is the contract both read, the cloud-session exception names both branch prefixes, and both run the one check -- so nothing is built twice.
+- `open` "(1) In AGENTS.md add a cloud-session exception: agents may push a task/* branch and open a PR, never commit to main directly." — 09-12 · the first half of the task he submitted from the chat (its words were drafted there and sent as his). Shipped in the same change as the row above.
+- `open` "(2) Replace scripts/make_test_library.py with a portable fixture builder: download a small fixed set of public-domain photographs from Library of Congress or Internet Archive (hardcoded URLs, SHA-256 per file, a PROVENANCE.md listing source and license), write them into the Edits / Raws/Digital / Snapshots date-folder layout under a path from AZIMUTH_TEST_LIBRARY or --dest instead of C:\, and include controlled cases: known capture dates, a duplicate pair, a nested folder. Must run on Linux and pass scripts/azimuth-check." — 09-12 · the second half of the same submitted task; its own pull request, on top of the first.
+
 ## 2. Derived queue
 
 > **Historical pre-V2 queue.** Statuses and evidence below are preserved because

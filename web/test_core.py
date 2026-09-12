@@ -16,6 +16,8 @@ import struct
 import tempfile
 import unittest
 from unittest.mock import patch
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 import rank
 import render
@@ -175,7 +177,7 @@ class FreshCatalogTests(unittest.TestCase):
                 Image.new("RGB", (900, 600), "teal").save(os.path.join(photo_root, "2026", "second.jpg"), "JPEG")
                 reopened.refresh(attached["uuid"])
                 self.assertEqual(reopened.folders()[0]["total_count"], 2)
-            tile_file = Path(again[0]["tile"].removeprefix("file:///"))
+            tile_file = Path(url2pathname(urlparse(again[0]["tile"]).path))
             body = tile_file.read_bytes()
 
         self.assertEqual(swept["photos_added"], 1)
@@ -534,7 +536,9 @@ class DrivesAreNotLetters(CoreCase):
         # Tails travel between drives; one carrying a backslash stops matching
         # the same photo on a drive that spells it with a slash.
         path = os.path.join(self.hot_root, "Raws", "Digital", "x.CR3")
-        self.assertEqual(drives.tail_for(self.hot_root.upper(), path), "Raws/Digital/x.CR3")
+        # Folded only where the platform folds (NTFS does, ext4 does not).
+        spelled = self.hot_root.upper() if os.path.normcase("A") == "a" else self.hot_root
+        self.assertEqual(drives.tail_for(spelled, path), "Raws/Digital/x.CR3")
         self.assertIsNone(drives.tail_for(self.cold_root, path))
 
     def test_a_tail_can_never_escape_its_drive(self):

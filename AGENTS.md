@@ -25,6 +25,13 @@ overlay, stop and reconcile the discrepancy before coding.
 - GitHub `main` is the released product source of truth. An owner-approved
   rewrite may live on a named branch until its deliberate review and merge; do
   not create additional branches or move production to it implicitly.
+- Cloud-session exception: an agent working in a cloud session (Claude Code
+  on the web or Codex, started from the phone or a browser) may push a
+  `task/*` branch, or the branch its cloud names for it (`claude/*`,
+  `codex/*`), and open a pull request for review. It never commits to `main`
+  directly; merging is the owner's act. The branch lives as long as its pull
+  request. This file is the contract for every agent, whichever model runs
+  it.
 - Runtime data never belongs inside a source checkout.
 - Do not add personal usernames, home directories, private addresses, mount
   points, catalog paths, or secrets to tracked defaults or documentation.
@@ -40,7 +47,8 @@ overlay, stop and reconcile the discrepancy before coding.
 
 - Commit owned changes in small, atomic commits on the current owner-approved
   branch. Do not create branches, worktrees, lanes, or parallel editing
-  sessions unless the user explicitly requests them.
+  sessions unless the user explicitly requests them; a cloud session's own
+  task branch is the one exception, above.
 - Never change a production checkout's branch or restart a long-running service
   as a side effect of development.
 - Stage explicit paths. Never use `git add -A` in a shared or dirty tree.
@@ -206,7 +214,9 @@ statement is too ambiguous to build from. Unresolved contradictions live in
 - A merge to `main` that changes product behavior is not finished until the
   installed Windows desktop app is rebuilt and reinstalled
   (`scripts/build_windows_desktop.ps1`), so the owner is never testing a stale
-  bundle. Coordinate across sessions so exactly one rebuild runs per batch.
+  bundle. Coordinate across sessions so exactly one rebuild runs per batch. A
+  cloud session cannot rebuild it: its pull request says so, and the owner
+  rebuilds at the next sitting.
 
 ## Handoff
 
