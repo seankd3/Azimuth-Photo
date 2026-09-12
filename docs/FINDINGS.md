@@ -831,6 +831,8 @@ finding was checked and the numbers said no.
 | X187 | The strip said "Open the merged preview" and, with the merge shown, closed it (the fact's toggle) | the strip only opens, and says "The merge, shown in the loupe" while it is | shipped |
 | X188 | `doing` had three owners: a merge finishing blanked a running export's line (and the reverse) | a job clears only the word it said (`busy`) | shipped |
 | X189 | The first-open hint, hidden for a merge, never came back that session | it yields to the merge and returns with the frame while the loupe is still teaching | shipped |
+| X190 | The command line's key strip took a key written by hand into a title (Done (D), Back to the library (Esc), Import from the card (I)) and had no cap to put back | only the key the table derives is dropped; a hand-written one stays | shipped |
+| X191 | `busy` compared words, and two merges say the same word: the first to finish blanked the second's line and freed the in-flight slot | a ticket per job, not its word; the in-flight guard is a set | shipped |
 | X174 | `cache.evict` protects only the never-evict kinds it is handed; a caller with a partial tuple would have a never-evict kind's rows and files taken (the worker hands every kind, so unreachable today; the X166 test uses a partial tuple by fixture) | held: the worker is the one caller and is handed every kind | held |
 
 ## Refutation of D1-D5, PF4, PF5, E2-3 (2026-09-12, by a second model)

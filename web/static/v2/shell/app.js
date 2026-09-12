@@ -1396,14 +1396,16 @@ function teachLoupe() {
 // The merged panorama the loupe stands in for a sweep's frame lives in the
 // store (`merged`), so the fact's words and the loupe agree; cleared when
 // the loupe closes, so Enter on the frame shows the frame.
-let merging = null;
+const merging = new Set();
 
 // Work in flight, said on the status line: the word is the job's own, so
 // a job that ends clears only what it said (an export and a merge may
 // overlap).
+let ticket = 0;
 function busy(word) {
+  const mine = ++ticket;
   update({ doing: word });
-  return () => { if (read().doing === word) update({ doing: '' }); };
+  return () => { if (ticket === mine) update({ doing: '' }); };
 }
 
 async function mergeSweep(photo, open = false) {
@@ -1421,15 +1423,15 @@ async function mergeSweep(photo, open = false) {
     update({ merged: { id: photo.id, ...held } });
     return;
   }
-  if (merging === photo.id) return;
-  merging = photo.id;
+  if (merging.has(photo.id)) return;
+  merging.add(photo.id);
   // Work in progress goes to the status line; the toast is for outcomes.
   const done = busy('Merging the sweep\u2026');
   let made;
   try {
     made = await product.mergePreview(photo.id).catch((error) => { notify(why(error)); return undefined; });
   } finally {
-    merging = null;
+    merging.delete(photo.id);
     done();
   }
   if (made === null) notify('The frames could not be merged.');
@@ -2429,7 +2431,11 @@ function commands(query) {
     const action = node.dataset.action;
     // A control that rewrote its tooltip (Cancel or Back; merge, open or
     // frame) is offered in its own words.
-    const tip = (node.title || TIPS[action] || '').replace(/ \([^()]*\)$/, '');
+    // The label without the key the tooltip carries, which the row shows
+    // as its own cap; a key written by hand into a title stays.
+    const key = KEY_OF.get(action);
+    const said = node.title || TIPS[action] || '';
+    const tip = key && said.endsWith(` (${key})`) ? said.slice(0, -key.length - 3) : said;
     if (!tip || seen.has(action) || !onScreen(node)) continue;
     if (want && !tip.toLowerCase().includes(want)) continue;
     seen.add(action);
