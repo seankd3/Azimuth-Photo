@@ -3,9 +3,9 @@
 **A round is the atomic act — this one, out of these.** Everything here follows
 from taking that literally.
 
-`strength()` fits the round log — what you measured. `taste` predicts the
-rest. Ranking is the blend, and it is **recomputed, never stored as if it were
-judgement**.
+`fit()` is one Plackett–Luce fit over the rounds — a direction in the
+embedding space and each photograph's own residual, learned together — and it
+is **recomputed, never stored as if it were judgement**.
 
 Three things fall out of storing the round whole rather than shredding it:
 
@@ -181,42 +181,65 @@ def retract(conn, decision: int) -> dict:
     return {"decision": number, "retracted": int(decision)}
 
 
-def strength(conn, *, steps: int = 300, rate: float = 1.0, pull: float = 1.0) -> dict[str, float]:
-    """How good each photograph is, from the rounds alone.
+LAM_W = 1.0     # the ridge on the direction
+LAM_B = 1.0     # the pull on a photograph's own residual
+STEPS = 300     # Adam steps; the fit is convex, this is past convergence
 
-    One model, and set size is not a parameter of it: the chance you picked `p`
-    out of the set `S` is `softmax(s)[p]`, so a duel and a grid of twelve are
-    the same statement at different sizes. That is why the mosaic can be
-    flexible about numbers without the ranking growing a mode.
 
-    Fitted, not replayed. Elo folds the log in order and is path-dependent by
-    construction — its own predecessor here admitted as much, and the archive
-    proved it: replaying the recorded pairs matched the stored numbers exactly
-    for 41 comparisons and then diverged for good, because something had
-    written to a photograph in place. A fit has no such memory. The same rounds
-    in any order give the same answer, and one more round re-fits everything
-    rather than appending to a history you cannot audit.
+def fit(log: list[tuple[str, list[str]]], subjects: list[str] | None = None, vectors=None) -> dict[str, float]:
+    """The whole ranking, from one fit on the rounds.
 
-    `pull` holds the scale still. Softmax only ever sees differences, so
-    nothing anchors the numbers; without it a photograph that only ever won
-    walks off to infinity. It is the same job Elo's fixed 1200 base did, doing
-    it honestly.
+    Every photograph's score is `x . w + b`: what its vector says a photograph
+    like it is worth, and what its own rounds say beyond that. One
+    Plackett-Luce likelihood over every round -- the chance you picked `p`
+    out of the set `S` is `softmax(score)[p]`, so a duel and a grid of twelve
+    are the same statement at different sizes -- fitted for `w` and `b`
+    together, so the direction is learned from the rounds themselves rather
+    than from strengths fitted first. Measured (E1, five-fold over 4,308 of
+    the owner's rounds): the two-stage head it replaces placed the picked
+    photograph first in 45.3% of held-out rounds, this one in 52.5%;
+    pairwise 80.4% to 82.2%.
+
+    Fitted, not folded. Elo folds the log in order and is path-dependent by
+    construction; the same rounds in any order give this the same answer,
+    and one more round re-fits everything rather than appending to a history
+    you cannot audit.
+
+    The pull on `b` is what stops a photograph that only ever won from
+    walking off to infinity (nothing in the data ever pulls it back); the
+    ridge on `w` is what keeps a direction from being read off a handful of
+    rounds. Both are fixed while the evidence grows, so the more you rank
+    the more it means. With no vectors it is the fit over `b` alone, which
+    is correct on a fresh library, not a fallback: ranking works at zero
+    embedding coverage and reaches every photograph the moment it has a
+    vector.
+
+    Reported on the scale the app already speaks (`BASE + SPREAD * score`),
+    a display choice, not a model one.
     """
 
-    log = rounds(conn)
     if not log:
         return {}
 
     import numpy as np
 
-    subjects = sorted({h for picked, over in log for h in (picked, *over)})
-    index = {h: i for i, h in enumerate(subjects)}
+    judged = sorted({h for picked, over in log for h in (picked, *over)})
+    order = list(subjects or [])
+    known = set(order)
+    order += [h for h in judged if h not in known]
+    index = {h: i for i, h in enumerate(order)}
+    n = len(order)
+    if vectors is not None and len(order) > len(judged) - len(known & set(judged)) and len(subjects or []):
+        held = np.asarray(vectors, dtype=np.float32)
+        x = np.zeros((n, held.shape[1]), dtype=np.float32)
+        x[:len(subjects)] = held
+    else:
+        x = np.zeros((n, 0), dtype=np.float32)
 
-    # Every round flattened into one long list of members, with a parallel list
-    # saying which round each belongs to. That turns the whole fit into array
-    # arithmetic and `bincount`, so a hundred thousand rounds costs about what
-    # a thousand did in Python -- and rounds of different sizes need no
-    # special case, which is the point.
+    # Every round flattened into one long list of members, with a parallel
+    # list saying which round each belongs to: the whole fit is array
+    # arithmetic and `bincount`, and rounds of different sizes need no
+    # special case.
     member, belongs, picked_at = [], [], []
     for number, (picked, over) in enumerate(log):
         picked_at.append(len(member))
@@ -228,34 +251,43 @@ def strength(conn, *, steps: int = 300, rate: float = 1.0, pull: float = 1.0) ->
     member = np.asarray(member)
     belongs = np.asarray(belongs)
     picked_at = np.asarray(picked_at)
+    onehot = np.zeros(len(member), dtype=np.float32)
+    onehot[picked_at] = 1.0
+    rounds_n = float(len(log))
+    xm = x[member]
+    width = x.shape[1]
 
-    scores = np.zeros(len(subjects))
-    # Each photograph steps by its own evidence rather than the library's. A
-    # photograph in twenty rounds should be pinned twenty times as firmly as
-    # one in a single round -- dividing by the total number of rounds instead
-    # would shrink every strength toward the middle as the log grew, so the
-    # more you ranked the less any of it would mean.
-    appearances = np.bincount(member, minlength=len(subjects)).astype(float)
-    pace = rate / np.maximum(appearances, 1.0)
+    w = np.zeros(width, dtype=np.float32)
+    b = np.zeros(n, dtype=np.float32)
+    mw, vw = np.zeros(width, dtype=np.float32), np.zeros(width, dtype=np.float32)
+    # Each photograph's residual steps by its own evidence: one in twenty
+    # rounds is pinned twenty times as firmly as one in a single round,
+    # and the pull does not scale with appearances -- evidence does, belief
+    # does not. The direction, shared by every round, steps by Adam.
+    appearances = np.bincount(member, minlength=n).astype(np.float32)
+    pace = 1.0 / np.maximum(appearances, 1.0)
+    rate = 0.05
+    for t in range(1, STEPS + 1):
+        s = (xm @ w if width else 0.0) + b[member]
+        top = np.maximum.reduceat(s, picked_at)
+        e = np.exp(s - top[belongs])
+        prob = e / np.bincount(belongs, weights=e)[belongs]
+        g = (prob - onehot).astype(np.float32)
+        gb = np.bincount(member, weights=g, minlength=n).astype(np.float32)
+        b -= pace * (gb + LAM_B * b) / (1.0 + t / 120.0)
+        if width:
+            gw = (xm.T @ g) / rounds_n + LAM_W * w / rounds_n
+            mw = 0.9 * mw + 0.1 * gw
+            vw = 0.999 * vw + 0.001 * gw * gw
+            w -= rate * (mw / (1 - 0.9 ** t)) / (np.sqrt(vw / (1 - 0.999 ** t)) + 1e-8)
+    scores = (x @ w if width else 0.0) + b
+    return {h: BASE + SPREAD * float(scores[i]) for h, i in index.items()}
 
-    for step in range(steps):
-        values = scores[member]
-        top = np.maximum.reduceat(values, picked_at)          # per-round max
-        weights = np.exp(values - top[belongs])
-        share = weights / np.bincount(belongs, weights=weights)[belongs]
-        gradient = -np.bincount(member, weights=share, minlength=len(subjects))
-        np.add.at(gradient, member[picked_at], 1.0)           # the one you picked
-        # The pull does NOT scale with appearances. Evidence does; belief does
-        # not. A photograph that won its only round has, strictly, unbounded
-        # strength -- nothing in the data ever pulls it back -- so the prior is
-        # what stops one lucky frame outranking a photograph that won twenty
-        # times. Scaling the prior by appearances would have applied it most
-        # weakly exactly where it is needed most.
-        scores += pace * (gradient - pull * scores) / (1.0 + step / 120.0)
 
-    # Reported on the scale the app already speaks, so nothing downstream has
-    # to learn a new one. The mapping is a display choice, not a model one.
-    return {h: BASE + SPREAD * float(scores[index[h]]) for h in subjects}
+def ranking(conn, subjects: list[str] | None = None, vectors=None) -> dict[str, float]:
+    """The ranking from the log: `fit` over every round you have not retracted."""
+
+    return fit(rounds(conn), subjects, vectors)
 
 
 # A star is the ranking's readable face, and it is earned: only a photograph
@@ -742,26 +774,3 @@ def progress(conn, scope: Scope = EVERYTHING) -> dict[str, int]:
 
 def judged(conn, scope: Scope = EVERYTHING) -> int:
     return progress(conn, scope)["judged"]
-
-
-def ranking(conn, subjects: list[str] | None = None, vectors=None) -> dict[str, float]:
-    """The whole ranking: what you measured, and what the direction predicts.
-
-    With no vectors it degrades to strength over what you actually compared —
-    which is correct, not a fallback. Ranking works at zero embedding coverage
-    and sharpens as the owed queue drains.
-
-    This used to spread judged ratings to look-alikes by cosine similarity: a
-    threshold, a cubic weighting, a neighbour cap and a decay factor, all of
-    them dials. One fitted direction beats the lot on held-out photographs
-    (+0.600 against +0.533 over 16,436 with both a strength and a vector) and
-    reaches every photograph rather than only those near something judged. Four
-    constants and a hundred lines went with it.
-    """
-
-    import taste
-
-    measured = strength(conn)
-    if not subjects or vectors is None:
-        return measured
-    return taste.scores(measured, seen(conn), subjects, vectors)

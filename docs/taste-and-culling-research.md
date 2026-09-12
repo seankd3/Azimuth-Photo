@@ -64,7 +64,7 @@ frames of one stack, and the "why" on a tile is the largest term of
 
 ## The experiments, in order
 
-1. **E1** One-stage PL fit on the rounds vs the two-stage strength→ridge. Data on hand; minutes of CPU; expected +1–3 duel points and one seam deleted.
+1. **E1** One-stage PL fit on the rounds vs the two-stage strength→ridge. **Done 09-12:** five-fold over 4,308 of Sean's rounds — round accuracy 0.453 → 0.525, pairwise 0.804 → 0.822 (λw = 1, λb = 1; λw = 0.1 the same within noise). Shipped as `rank.fit`; `taste.py` deleted.
 2. **E2** The eye and sharpness facets as a `sharpness` cache kind (faces first, newest first), then the facet block in the fit. An overnight lane; the largest gain on portrait rounds; reported per genre.
 3. **E3** The per-cluster residual. Minutes; within-genre is where the room is (+.35 today).
 4. **E4** Bayesian-ridge variance as Learn's σ, and top-two finding rounds. Minutes; 2–3× sample efficiency in the bandit literature.

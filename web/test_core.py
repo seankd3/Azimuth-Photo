@@ -1705,7 +1705,7 @@ class RankingIsDerived(CoreCase):
         pairs = [(f"w{i}", [f"l{i}"]) for i in range(12)] + [("w0", ["w1"]), ("w2", ["w0"])]
         for at, (winner, over) in enumerate(pairs):
             self._round(winner, over, 1.0 + at)
-        first = rank.strength(self.conn)
+        first = rank.ranking(self.conn)
 
         shuffled = list(self.conn.execute(
             "SELECT id, subject, value FROM decisions WHERE family = 'compare'").fetchall())
@@ -1715,7 +1715,7 @@ class RankingIsDerived(CoreCase):
             def execute(self, *args, **kwargs):
                 return shuffled
 
-        again = rank.strength(Reordered())
+        again = rank.ranking(Reordered())
         for photo, score in first.items():
             self.assertAlmostEqual(score, again[photo], places=9)
 
@@ -1725,7 +1725,7 @@ class RankingIsDerived(CoreCase):
         # same statement at different strengths.
         self._round("grid", [f"other{i}" for i in range(11)], 1.0)
         self._round("duel", ["someone"], 2.0)
-        scores = rank.strength(self.conn)
+        scores = rank.ranking(self.conn)
         self.assertGreater(scores["grid"], scores["duel"])
 
     def test_a_photo_that_only_ever_won_does_not_run_away(self):
@@ -1734,47 +1734,48 @@ class RankingIsDerived(CoreCase):
         # the top of the library.
         for at in range(30):
             self._round("lucky", [f"other{at}"], 1.0 + at)
-        scores = rank.strength(self.conn)
+        scores = rank.ranking(self.conn)
         self.assertLess(scores["lucky"], rank.BASE + 6 * rank.SPREAD)
 
     def test_your_verdict_outweighs_the_prediction_once_you_have_looked(self):
-        # The guarantee the old MAX_DIRECT_COMPARISONS cap was trying to buy,
-        # now a weight rather than a threshold: a photograph you have judged
-        # many times is almost entirely its own strength, whatever the
-        # direction thinks of it.
+        # A photograph you have judged many times keeps its own place
+        # whatever the direction thinks of it: its residual is fitted beside
+        # the direction, not blended in afterwards. Here "often" wears the
+        # very same vector as a photograph it beat forty times.
         import numpy as np
-        import taste
         for at in range(40):
             self._round("often", [f"other{at}"], 1.0 + at)
-        measured = rank.strength(self.conn)
-        seen = rank.seen(self.conn)
-        subjects = sorted(measured)
-        vectors = np.eye(len(subjects), dtype=np.float64)[:, :8]
-        out = taste.scores(measured, seen, subjects, vectors)
-        drift = abs(out["often"] - measured["often"])
-        self.assertLess(drift, abs(measured["often"] - rank.BASE) * 0.25)
+        subjects = ["often", "other0"] + [f"other{at}" for at in range(1, 40)]
+        vectors = np.zeros((len(subjects), 8))
+        vectors[0, 0] = vectors[1, 0] = 1.0      # often and other0 look alike
+        for i in range(2, len(subjects)):
+            vectors[i, 1 + i % 7] = 1.0
+        out = rank.ranking(self.conn, subjects, vectors)
+        self.assertGreater(out["often"], out["other0"] + rank.SPREAD)
 
     def test_a_photograph_you_never_judged_still_gets_a_score(self):
         # What the neighbour propagation could not do: a photograph far from
         # everything judged got nothing and sat at base forever. A direction is
-        # a function of the vector, so coverage is total the moment it has one.
+        # a function of the vector, so coverage is total the moment it has one
+        # -- and a stranger that looks like the winners scores like them.
         import numpy as np
-        import taste
         for i in range(20):
             self._round(f"win{i}", [f"lose{i}"], 1.0 + i)
-        measured = rank.strength(self.conn)
-        subjects = sorted(measured) + ["stranger"]
-        rng = np.random.default_rng(3)
-        vectors = rng.normal(size=(len(subjects), 6))
-        vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)
-        out = taste.scores(measured, rank.seen(self.conn), subjects, vectors)
-        self.assertIn("stranger", out)
+        subjects = [f"win{i}" for i in range(20)] + [f"lose{i}" for i in range(20)] + ["stranger", "nobody"]
+        vectors = np.zeros((len(subjects), 4))
+        vectors[:20, 0] = 1.0        # winners look one way
+        vectors[20:40, 1] = 1.0      # losers another
+        vectors[40, 0] = 1.0         # the stranger looks like a winner
+        vectors[41, 1] = 1.0         # nobody looks like a loser
+        out = rank.ranking(self.conn, subjects, vectors)
         self.assertTrue(np.isfinite(out["stranger"]))
+        self.assertGreater(out["stranger"], out["nobody"])
 
     def test_with_no_vectors_it_is_the_fit_not_a_failure(self):
         # Ranking works at zero embedding coverage and sharpens as they land.
         self._round("a", ["b"], 1.0)
-        self.assertEqual(rank.ranking(self.conn), rank.strength(self.conn))
+        out = rank.ranking(self.conn)
+        self.assertGreater(out["a"], out["b"])
 
     def _identified(self, tail, width=3000, height=2000):
         photo_id = self.photo(tail)
@@ -1860,7 +1861,7 @@ class RankingIsDerived(CoreCase):
         for repeat in range(rank.EARNED):
             for i, name in enumerate(order[:-1]):
                 rank.record(self.conn, ids[name][0], [ids[order[i + 1]][0]])
-        scores = rank.strength(self.conn)
+        scores = rank.ranking(self.conn)
         starred = rank.stars(scores, rank.seen(self.conn))
         self.assertEqual(starred[ids["a"][1]], 5)      # the best of even ten
         self.assertEqual(starred[ids["b"][1]], 2)      # each star halves the set
@@ -1871,7 +1872,7 @@ class RankingIsDerived(CoreCase):
         # seen fewer than three rounds: ranked but not yet starred
         fresh_id, fresh = self._identified("Raws/fresh.CR2")
         rank.record(self.conn, fresh_id, [ids["j"][0]])
-        self.assertNotIn(fresh, rank.stars(rank.strength(self.conn), rank.seen(self.conn)))
+        self.assertNotIn(fresh, rank.stars(rank.ranking(self.conn), rank.seen(self.conn)))
         # and a sidecar star stays in the log without touching the column
         decisions.decide(self.conn, ids["j"][1], decisions.STAR, 5)
         self.assertNotIn(decisions.STAR, decisions.PROJECTED)
@@ -1900,7 +1901,7 @@ class RankingIsDerived(CoreCase):
                 rank.record(self.conn, everyone[i][0], [everyone[i + 1][0]])
         shoots = {digest: f"Raws/2026-0{1 if (pid, digest) in strong else 2}-0{1 if (pid, digest) in strong else 2}"
                   for pid, digest in strong + weak}
-        starred = rank.stars(rank.strength(self.conn), rank.seen(self.conn), shoots)
+        starred = rank.stars(rank.ranking(self.conn), rank.seen(self.conn), shoots)
         best_weak = weak[0][1]
         self.assertEqual(starred[best_weak], 3, "the weak shoot keeps its keeper")
         self.assertLess(starred[weak[1][1]], 3, "one keeper, not a tide")
