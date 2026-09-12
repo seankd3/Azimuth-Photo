@@ -704,6 +704,12 @@ def _spread(pool: list[dict], n: int, space) -> list[dict]:
 
     import random
 
+    # The least-worn tier is cut from a pool that arrives in filing order,
+    # and before anything is judged every photograph is equally worn: a tie
+    # broken by that order was the first shoot in the pool, so a "diverse"
+    # round was six frames of one evening (the owner, 09-12). The tie is
+    # broken at random before any sort by wear.
+    pool = random.sample(pool, len(pool))
     placed = {}
     if space is not None and space[1] is not None and len(space[0]):
         placed = {subject: i for i, subject in enumerate(space[0])}
@@ -714,9 +720,11 @@ def _spread(pool: list[dict], n: int, space) -> list[dict]:
         for p in fresh:
             if p.get("date_taken"):
                 by_day.setdefault(str(p["date_taken"])[:10], []).append(p)
-        if len(by_day) >= n:
+        if len(by_day) >= 2:
             # One frame per day in turn, the days in order: a round is as
-            # many shoots as it has seats, never one evening six times.
+            # many shoots as the tier holds before any day is seen twice,
+            # never one evening six times. Two days already spread further
+            # than a rating the unjudged all share.
             picked: list[dict] = []
             lanes = [sorted(frames, key=lambda p: p["comparisons"]) for _day, frames in sorted(by_day.items())]
             while len(picked) < len(fresh):
@@ -735,7 +743,6 @@ def _spread(pool: list[dict], n: int, space) -> list[dict]:
 
     import numpy as np
 
-    random.shuffle(seen_in_space)
     seen_in_space.sort(key=lambda p: p["comparisons"])
     tier = seen_in_space[: max(4 * n, 48)]
     matrix = space[1]
