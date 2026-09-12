@@ -13,6 +13,7 @@ one-afternoon job — noticing the sixteenth copy a year later is not.
 import ast
 import collections
 import hashlib
+import os
 import pathlib
 import unittest
 
@@ -29,13 +30,27 @@ MEANINGFUL_STATEMENTS = 3
 ALLOWED: set[str] = set()
 
 
+def _sources() -> list[pathlib.Path]:
+    """The product's own modules: a pruned walk, because rglob visited the
+    venv's 14,000 files before skipping them (4 s, past the suite's ten
+    under load) where pruning is 74 files in 11 ms."""
+
+    found: list[pathlib.Path] = []
+    for root, dirs, files in os.walk(WEB):
+        dirs[:] = [d for d in dirs if d not in SKIPPED_DIRECTORIES]
+        found.extend(pathlib.Path(root) / name for name in files
+                     if name.endswith(".py") and not name.startswith(("test_", "bench")))
+    return found
+
+
 def _duplicate_bodies() -> dict[str, set[str]]:
     """Map each repeated helper name to the modules that define it identically."""
 
     bodies: dict[tuple[str, str], set[str]] = collections.defaultdict(set)
-    for path in WEB.rglob("*.py"):
-        if SKIPPED_DIRECTORIES.intersection(path.parts) or path.name.startswith(("test_", "bench")):
-            continue
+    # A pruned walk: rglob visited the venv's 14,000 files before skipping
+    # them (4 s, past the suite's ten under load); pruning is 74 files in
+    # 11 ms.
+    for path in _sources():
         try:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
         except SyntaxError:
@@ -80,11 +95,7 @@ class OnePlaceTests(unittest.TestCase):
         """An entry that no longer duplicates anything should be deleted."""
 
         bodies: dict[tuple[str, str], set[str]] = collections.defaultdict(set)
-        for path in WEB.rglob("*.py"):
-            if SKIPPED_DIRECTORIES.intersection(path.parts) or path.name.startswith(
-                ("test_", "bench")
-            ):
-                continue
+        for path in _sources():
             try:
                 tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
             except SyntaxError:
