@@ -32,6 +32,10 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
   // Shift ranges, and a checkbox ticked on a selection answers for all of
   // it — Lightroom's import hands, Azimuth's one grammar.
   let order = [];              // candidate keys in rendered (day-grouped) order
+  const cells = new Map();     // key -> { cell, box }: the stage answers by key, never by query
+  const dayBoxes = new Map();  // day -> its checkbox
+  let wornChecked = new Set(); // what the cells show, so a change touches only the difference
+  let wornSelected = new Set();
   let selected = new Set();
   let anchor = null;
   let poll = null;
@@ -157,6 +161,10 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     }
     const days = [...byDay.keys()].sort((a, b) => (a === '') - (b === '') || b.localeCompare(a));
     order = [];
+    cells.clear();
+    dayBoxes.clear();
+    wornChecked = new Set();
+    wornSelected = new Set();
     const rows = [];
     for (const day of days) {
       const members = byDay.get(day);
@@ -165,6 +173,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
       const box = document.createElement('input');
       box.type = 'checkbox';
       box.dataset.day = day;
+      dayBoxes.set(day, box);
       const title = document.createElement('span');
       title.textContent = dayTitle(day);
       const count = document.createElement('span');
@@ -195,6 +204,8 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
         when.textContent = (candidate.taken || '').slice(0, 16) + (candidate.suspect ? ' · same name and size as one in the library' : '');
         cell.append(box, image, name, when);
         rows.push(cell);
+        cells.set(candidate.key, { cell, box });
+        if (state.checked.has(candidate.key)) wornChecked.add(candidate.key);
       }
     }
     stage.replaceChildren(...rows);
@@ -204,15 +215,24 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     syncChecks();
   }
 
+  // Only the cells whose state moved are touched: a day's box on a card
+  // of thousands is a few dozen writes, not a walk of the whole stage.
+  function wear(worn, now, put) {
+    for (const key of worn) if (!now.has(key)) put(key, false);
+    for (const key of now) if (!worn.has(key)) put(key, true);
+    return new Set(now);
+  }
+
   function syncChecks() {
-    for (const box of stage.querySelectorAll('.stage-cell input[type="checkbox"]')) {
-      const checked = state.checked.has(box.dataset.key);
-      box.checked = checked;
-      box.closest('.stage-cell').classList.toggle('is-checked', checked);
-    }
-    for (const cell of stage.querySelectorAll('.stage-cell')) {
-      cell.classList.toggle('is-selected', selected.has(cell.dataset.key));
-    }
+    wornChecked = wear(wornChecked, state.checked, (key, on) => {
+      const held = cells.get(key);
+      if (!held) return;
+      held.box.checked = on;
+      held.cell.classList.toggle('is-checked', on);
+    });
+    wornSelected = wear(wornSelected, selected, (key, on) => {
+      cells.get(key)?.cell.classList.toggle('is-selected', on);
+    });
     // A day's own box says what its photographs say: all, none, or some.
     const byDay = new Map();
     for (const candidate of state.candidates) {
@@ -222,8 +242,8 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
       tally.of += 1;
       if (state.checked.has(candidate.key)) tally.held += 1;
     }
-    for (const box of stage.querySelectorAll('.stage-day input[type="checkbox"]')) {
-      const tally = byDay.get(box.dataset.day) || { held: 0, of: 0 };
+    for (const [day, box] of dayBoxes) {
+      const tally = byDay.get(day) || { held: 0, of: 0 };
       box.checked = tally.held > 0 && tally.held === tally.of;
       box.indeterminate = tally.held > 0 && tally.held < tally.of;
     }
@@ -499,7 +519,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
         anchor = key;
       }
       syncChecks();
-      stage.querySelector(`.stage-cell[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'nearest' });
+      cells.get(key)?.cell.scrollIntoView({ block: 'nearest' });
       return true;
     },
     checkAll: () => { state.checked = new Set(state.candidates.map((c) => c.key)); syncChecks(); render(); },

@@ -206,11 +206,11 @@ finding was checked and the numbers said no.
 |---|---|---|---|
 | FR1 | Esc can close the app behind a modal: Rank or the wall are tested before the drive dialog | any open modal is the first rung | shipped |
 | FR2 | Cancelling the folder picker leaves the drive dialog looking broken | say it, or close | shipped |
-| FR3 | Two clicks and two surfaces to add one folder | picker first, then the dialog about that folder | shipped |
+| FR3 | Every staged thumbnail decodes a raw on the bridge thread, unbounded | the thumb is made on the intake lane (one worker; the raw's embedded preview), so the window's other verbs never wait behind a card of thousands | shipped |
 | FR4 | If proposing a home throws, first run is a black window | open the dialog first, fill the path after | shipped |
 | FR5 | Esc on the home dialog is a silent no-op | one sentence saying why | shipped |
 | FR6 | 'Point me at your photos.' is the product's only first-person sentence | 'Where are your photographs?' | shipped |
-| FR7 | Two labels for one control: Add folder / Add a folder | one label with the ellipsis | shipped |
+| FR7 | The stage is not virtualised; a day checkbox costs ~4,000 DOM queries | the stage keeps a map from key to cell and touches only the cells whose state moved; the day boxes are held, not queried | shipped |
 | FR8 | Python exception text is the dialog's error copy | map the closed set of refusals | shipped |
 
 ## Keyboard map
@@ -738,6 +738,6 @@ finding was checked and the numbers said no.
 | E2-1 | Nothing said where the sharpness sits: a missed focus and a bokeh portrait looked alike to every surface | a `sharpness` cache kind on the CPU behind the tiles: the frame's local-variation map (p50/p75/p90), the largest face's box against the frame (subject ratio), and Zhu–Milanfar's noise-aware measure on every face crop from the 4,096 px rendition (gated by crop size); the inspector says the numbers, never a verdict | shipped |
 | E2-2 | Eyes: open/closed/can't tell, and each eye's own sharpness | the 106-landmark model buffalo_l already ships runs in the sharpness pass on each face over 48 px; each eye's contour height over width is its openness and Zhu–Milanfar on the padded eye crop its sharpness; the photograph's word is the largest face's, said only when both eyes are readable and agree (open ≥ 0.25, closed ≤ 0.15, else Cannot tell); the inspector says it; OCEC left out (the contour alone read every proof face; add it only if E5 shows blinks slipping through) | shipped |
 | E1 | The head was two fits in a row: strengths from the rounds, then a ridge direction fitted to those strengths, blended back by a trust weight | one Plackett–Luce fit over every round learns the direction and each photograph's residual together (`rank.fit`); measured five-fold on 4,308 of the owner's rounds: the picked photograph placed first in 45.3% of held-out rounds before, 51.6% now; pairwise 80.4% → 82.2%; 3.4 s a fit on the rank lane; `taste.py` deleted | shipped |
-| E3 | Within a genre the direction reaches only +.35 | a per-cluster residual penalised toward zero | open |
+| E3 | A per-genre residual, so a night lake and a portrait stop sharing one scale | rejected by measurement: 16/32/64 k-means cluster offsets beside the direction move round accuracy 0.516 → 0.515–0.520 (noise); each photograph's own residual in the one-stage fit already absorbs its genre | rejected |
 | E4 | Learn's uncertainty is feature-blind | Bayesian-ridge variance as σ; top-two finding rounds | open |
 | E5 | Burst-best is unmeasured | facets alone against the owner's picks within cadence stacks; the why on the tile from the largest term | open |

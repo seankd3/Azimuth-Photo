@@ -505,7 +505,7 @@ class Desktop:
     def thumb(self, source: str, key: str) -> str | None:
         if self._product is None:
             raise RuntimeError("Choose where Azimuth should live first.")
-        return self._product.thumb(str(source), str(key))
+        return self._wait(self._product.thumb(str(source), str(key)))
 
     def synchronize(self, folder: str = "") -> list[dict]:
         if self._product is None:

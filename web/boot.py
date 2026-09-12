@@ -1804,10 +1804,20 @@ class OwnedLibrary:
     def stop_intake(self) -> None:
         self._intake_stop.set()
 
-    def thumb(self, source: str, key: str) -> str | None:
-        """A small picture of one staged file, rendered into the home's staging
-        corner so the window can read it; None when the file will not render."""
+    async def thumb(self, source: str, key: str) -> str | None:
+        """A small picture of one staged file, made on the intake lane -- a
+        raw's embedded preview, decoded off the bridge thread so the window's
+        other verbs never wait behind a card of thousands -- rendered into
+        the home's staging corner so the window can read it; None when the
+        file will not render."""
 
+        with self._state:
+            if self._closed:
+                raise RuntimeError("library is closed")
+            future = self._intake_executor.submit(self._thumb, source, key)
+        return await asyncio.wrap_future(future)
+
+    def _thumb(self, source: str, key: str) -> str | None:
         import hashlib
 
         import render
