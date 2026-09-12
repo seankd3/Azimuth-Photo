@@ -78,8 +78,10 @@ held to one standard whichever agent made it. What a cloud session has and
 does:
 
 - The setup above, on Linux, with `python3.12` named outright (the
-  container's default `python3` may be older). Nothing of the owner's archive
-  is needed or reachable.
+  container's default `python3` may be older), then
+  `python scripts/make_test_library.py`, which builds the development archive
+  from public-domain photographs in seconds. Nothing of the owner's archive is
+  needed or reachable.
 - `./scripts/azimuth-check`, the same check as on Windows; with no desktop it
   builds the document instead of opening it. CI runs it on both platforms.
 - No window. A UI change is proven in the harness (`scripts/harness.py`) and
@@ -130,8 +132,12 @@ touch the screen:
   last round's, never diffed.
 
 `sim_rank.py` and `sim_learn.py` are the instruments the ranking modes were
-chosen with; `make_test_library.py` builds a few hundred real photos on fast
-disk to develop against instead of the archive.
+chosen with; `make_test_library.py` builds the development archive on fast
+disk instead of the real one: thirty-one public-domain photographs from the
+Library of Congress, pinned by SHA-256, in the three-root date-folder shape,
+with known capture dates, a duplicate pair, a nested folder and an undated
+frame (`--dest` or `AZIMUTH_TEST_LIBRARY` says where; `PROVENANCE.md` in the
+library root names each one's source and rights).
 
 ## Build the app
 

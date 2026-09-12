@@ -138,8 +138,8 @@ is not a query, a decision or a cache kind has no layer to live in.
   have to read past.
 - No test may take longer than 30 seconds. A slow suite does not get run, and a
   suite that does not get run is not protecting anything. Develop against
-  `scripts/make_test_library.py` (a few hundred photos on fast local disk),
-  never the real archive.
+  `scripts/make_test_library.py` (public-domain photographs on fast local
+  disk, the same on every machine), never the real archive.
 
 ## Verification
 
