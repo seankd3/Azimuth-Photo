@@ -325,6 +325,8 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   font-size: var(--t-meta);
 }
 .contextbar [data-result-label], .contextbar .rank-progress { margin-right: auto; }
+/* nothing to filter, sort, size or rank yet: the bar stays, its controls wait */
+.contextbar.is-bare > :not([data-result-label]):not(.rank-progress) { visibility: hidden; }
 .contextbar label { display: flex; align-items: center; gap: 7px; }
 .cull-actions { display: flex; gap: 7px; }
 .cull-actions button { display: flex; align-items: center; gap: 7px; }

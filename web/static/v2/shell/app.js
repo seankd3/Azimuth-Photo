@@ -1564,7 +1564,7 @@ function renderChrome(state) {
   library.renderInspector(inspector.querySelector('[data-inspector-facts]'), state.selected,
     { marked: state.marked, photos: state.photos, counts: state.counts, drives: state.drives, working: state.working, showFolder, applyChip, notify });
   editPanel.follows(state.view === 'loupe' ? state.selected : null);
-  const count = state.counts.photos.toLocaleString();
+  const held = state.counts.photos.toLocaleString();
   // The import workspace's own panel carries its counts; the library's
   // number beside the word Import would be someone else's answer.
   document.querySelector('[data-photo-count]').textContent = state.view === 'import'
@@ -1574,7 +1574,12 @@ function renderChrome(state) {
       : state.view === 'library' && !seeking() && !(state.folders || []).length && !state.album && !(state.chips || []).length && state.counts.photos > state.total
         ? `${count(state.total, 'photograph')} · ${(state.counts.photos - state.total).toLocaleString()} behind covers`
         : count(state.total, 'photograph');
-  document.querySelector('[data-sidebar-count]').textContent = count;
+  document.querySelector('[data-sidebar-count]').textContent = held;
+  // A library with nothing in it offers nothing to filter, sort, size or
+  // rank: the bar keeps its height and loses its controls until the first
+  // photographs arrive, so the one thing on screen is the way to add them.
+  document.querySelector('.contextbar').classList.toggle(
+    'is-bare', state.view === 'library' && !seeking() && (state.counts.photos || 0) === 0);
   document.querySelector('[data-trash-count]').textContent = state.counts.trash.toLocaleString();
   // The label speaks about the person's photographs, not the app's memory:
   // how many are selected, or nothing — the title already carries the count.
