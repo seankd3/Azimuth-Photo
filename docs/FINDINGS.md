@@ -790,6 +790,7 @@ finding was checked and the numbers said no.
 | LR21 | A source that failed once wore "cannot be shown" even after it loaded (a remade tile at the same path) | a load clears it (`onShown`) | shipped |
 | LR22 | Undo of a No restored the decision but the wall did not ask again until a later rewrite (the cached summary had dropped the pair) | the wall re-asks at once; the lane's next rewrite keeps it | shipped |
 | LR23 | `role=status` on Rank's progress spoke the whole sentence after every pick, on top of the pick's own sentence | dropped; the settings speak their word, the pick its name | shipped |
+| LR24 | At 13 inches the sidebar was 190 px: "All photographs" (IA6's word) truncated in its own row and the wordmark wrapped; the proofs had only ever run at 1900 px | the sidebar's floor is the 210 px the narrow breakpoint already uses; `native_proof.py --size 1366x768` proves the 13-inch persona from now on | shipped |
 
 ## Import and inspector (seventh round, 2026-09-12 night, audited by a second model)
 

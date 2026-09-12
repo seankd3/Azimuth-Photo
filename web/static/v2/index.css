@@ -41,7 +41,7 @@
      strip's band, the brand column */
   --ctx: 46px;
   --strip: clamp(64px, 11vh, 86px);
-  --brand: clamp(190px, 14vw, 260px);
+  --brand: clamp(210px, 14vw, 260px);   /* 210: the sidebar row "All photographs · 1,234" and the wordmark on one line */
   --rail: clamp(44px, 2.4vh, 72px);
   --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   /* Inter 400/500/600 and Plex Mono 400/500 ride inside the document, so a

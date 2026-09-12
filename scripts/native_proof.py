@@ -2,7 +2,7 @@
 """The real app, off-screen: open it on an isolated home, ask the page a
 question, capture its own window, close. Nothing touches the foreground.
 
-    python scripts/native_proof.py <home> <out.png> [--probe a.js --probe b.js] [--wait 25] [--gap 2]
+    python scripts/native_proof.py <home> <out.png> [--probe a.js --probe b.js] [--wait 25] [--gap 2] [--size 1366x768]
 
 `home` is an `AZIMUTH_HOME` with a catalog already attached and swept (build
 one with `boot.Library` first, or point at a proof home from an earlier run).
@@ -76,7 +76,9 @@ def main() -> int:
                         help="a JavaScript file evaluated in the page; its result is printed (repeatable)")
     parser.add_argument("--wait", type=float, default=25.0, help="seconds to let the library settle")
     parser.add_argument("--gap", type=float, default=2.0, help="seconds between probes, and before the capture")
+    parser.add_argument("--size", default="1900x1150", help="the window, WIDTHxHEIGHT: 1366x768 is the 13-inch persona")
     args = parser.parse_args()
+    width, height = (int(n) for n in args.size.lower().split("x"))
 
     os.environ["AZIMUTH_HOME"] = str(Path(args.home).resolve())
     # pywebview fixes its base path from the working directory at import, so
@@ -94,7 +96,7 @@ def main() -> int:
         "Azimuth Photo proof",
         url=edge.bundled_document().as_uri(),
         js_api=product,
-        width=1900, height=1150, x=-2400, y=60,
+        width=width, height=height, x=-2400, y=60,
         background_color="#0a0c0e",
     )
     product.bind(window)
