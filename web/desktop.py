@@ -192,6 +192,68 @@ def keep_a_log(where: str | None) -> None:
     logging.getLogger("azimuth").info("Azimuth Photo opened from %s", sys.executable)
 
 
+class Taskbar:
+    """The taskbar button's progress bar, the way every long job of a
+    professional app shows itself: ITaskbarList3 through ctypes alone, so
+    no package is added for it. Silent wherever it cannot work."""
+
+    def __init__(self):
+        self._hwnd = 0
+        self._api = None
+        self._showing = False
+        if not sys.platform.startswith("win"):
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            ole32 = ctypes.windll.ole32
+            ole32.CoInitialize(None)
+
+            class GUID(ctypes.Structure):
+                _fields_ = [("d1", wintypes.DWORD), ("d2", wintypes.WORD), ("d3", wintypes.WORD), ("d4", ctypes.c_ubyte * 8)]
+
+            def guid(text):
+                out = GUID()
+                ole32.CLSIDFromString(text, ctypes.byref(out))
+                return out
+
+            handle = ctypes.c_void_p()
+            made = ole32.CoCreateInstance(
+                ctypes.byref(guid("{56FDF344-FD6D-11d0-958A-006097C9A090}")), None, 1,
+                ctypes.byref(guid("{ea1afb91-9e28-4b86-90e9-9e9f8a5eefaf}")), ctypes.byref(handle))
+            if made != 0 or not handle:
+                return
+            table = ctypes.cast(ctypes.cast(handle, ctypes.POINTER(ctypes.c_void_p))[0], ctypes.POINTER(ctypes.c_void_p))
+            # ITaskbarList3's table: 3 HrInit, 9 SetProgressValue, 10 SetProgressState.
+            ctypes.WINFUNCTYPE(ctypes.HRESULT, ctypes.c_void_p)(table[3])(handle)
+            value = ctypes.WINFUNCTYPE(ctypes.HRESULT, ctypes.c_void_p, wintypes.HWND, ctypes.c_ulonglong, ctypes.c_ulonglong)(table[9])
+            state = ctypes.WINFUNCTYPE(ctypes.HRESULT, ctypes.c_void_p, wintypes.HWND, ctypes.c_int)(table[10])
+            self._api = (handle, value, state)
+        except Exception:  # noqa: BLE001 - a taskbar that will not answer is no error
+            self._api = None
+
+    def show(self, done: int, total: int) -> None:
+        if self._api is None:
+            return
+        if not self._hwnd:
+            self._hwnd = _our_window()
+            if not self._hwnd:
+                return
+        handle, value, state = self._api
+        try:
+            if total and done < total:
+                if not self._showing:
+                    state(handle, self._hwnd, 2)   # TBPF_NORMAL
+                    self._showing = True
+                value(handle, self._hwnd, int(done), int(total))
+            elif self._showing:
+                state(handle, self._hwnd, 0)       # TBPF_NOPROGRESS
+                self._showing = False
+        except Exception:  # noqa: BLE001
+            pass
+
+
 class Desktop:
     """The complete JavaScript-facing product vocabulary.
 
@@ -209,6 +271,7 @@ class Desktop:
         self._exported_to: str | None = None
         self._close_lock = threading.Lock()
         self._first_page_said = False
+        self._taskbar = None
         self._closed = False
         if home_path:
             self._settle(home_path)
@@ -514,7 +577,14 @@ class Desktop:
                                               include_culled=bool(include_culled)))
 
     def intake_status(self) -> dict:
-        return self._product.intake_status() if self._product else {"phase": "idle"}
+        status = self._product.intake_status() if self._product else {"phase": "idle"}
+        # The window polls this once a second while a card comes in; the
+        # taskbar button carries the same progress.
+        if self._taskbar is None:
+            self._taskbar = Taskbar()
+        running = status.get("phase") == "bringing"
+        self._taskbar.show(int(status.get("done") or 0), int(status.get("total") or 0) if running else 0)
+        return status
 
     def stop_intake(self) -> None:
         if self._product:
