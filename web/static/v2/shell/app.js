@@ -1036,16 +1036,16 @@ document.querySelector('[data-export-form]').addEventListener('submit', (event) 
   exportDialog.close();
   if (!ids.length) return;
   // Work in flight lives on the status line; the toast is for the outcome.
-  update({ doing: `Exporting ${numbered(ids.length, 'photograph')}…` });
+  const done = busy(`Exporting ${numbered(ids.length, 'photograph')}…`);
   product.exportPhotos(ids, quality, edge, rename).then((said) => {
-    update({ doing: '' });
+    done();
     if (!said.chosen) return;
     const parts = [];
     if (said.exported) parts.push(`${said.exported.toLocaleString()} exported`);
     if (said.missing) parts.push(`${said.missing.toLocaleString()} not here`);
     if (said.failed) parts.push(`${said.failed.toLocaleString()} failed`);
     notify(`${parts.join(', ') || 'Nothing exported'} — in ${said.destination}.`);
-  }).catch((error) => { update({ doing: '' }); notify(why(error)); });
+  }).catch((error) => { done(); notify(why(error)); });
 });
 
 // Forgetting the missing is a large act with no undo, so it is armed: the
@@ -1385,11 +1385,12 @@ async function selectIndex(index, { open = loupeOpen(), shift = false } = {}) {
 
 // The loupe teaches its grammar on its first three opens, then never again.
 const TAUGHT_KEY = 'azimuth.loupe-taught';
+let teaching = false;
 function teachLoupe() {
-  const hint = document.querySelector('[data-loupe-hint]');
   const times = Number(recall(TAUGHT_KEY, 0)) || 0;
-  hint.hidden = times >= 3;
-  if (times < 3) remember(TAUGHT_KEY, times + 1);
+  teaching = times < 3;
+  document.querySelector('[data-loupe-hint]').hidden = !teaching;
+  if (teaching) remember(TAUGHT_KEY, times + 1);
 }
 
 // The merged panorama the loupe stands in for a sweep's frame lives in the
@@ -1397,35 +1398,47 @@ function teachLoupe() {
 // the loupe closes, so Enter on the frame shows the frame.
 let merging = null;
 
-async function mergeSweep(photo) {
-  // Pressed while the merge is shown: the frame again.
+// Work in flight, said on the status line: the word is the job's own, so
+// a job that ends clears only what it said (an export and a merge may
+// overlap).
+function busy(word) {
+  update({ doing: word });
+  return () => { if (read().doing === word) update({ doing: '' }); };
+}
+
+async function mergeSweep(photo, open = false) {
+  // The fact pressed while the merge is shown: the frame again. The strip
+  // only ever opens.
   if (read().merged?.id === photo.id && loupeOpen()) {
-    update({ merged: null });
+    if (!open) update({ merged: null });
     return;
   }
   const held = photo.sweep?.preview;
   if (held) {
-    update({ merged: { id: photo.id, ...held } });
+    // The loupe first: a merge set while the grid shows is cleared by the
+    // render, since the merge stands in only while the loupe is up.
     showPhoto(photo);
+    update({ merged: { id: photo.id, ...held } });
     return;
   }
   if (merging === photo.id) return;
   merging = photo.id;
   // Work in progress goes to the status line; the toast is for outcomes.
-  update({ doing: 'Merging the sweep\u2026' });
+  const done = busy('Merging the sweep\u2026');
   let made;
   try {
     made = await product.mergePreview(photo.id).catch((error) => { notify(why(error)); return undefined; });
   } finally {
     merging = null;
-    update({ doing: '' });
+    done();
   }
   if (made === null) notify('The frames could not be merged.');
   if (!made) return;
   const current = read().selected;
   if (current?.id !== photo.id) return;
-  update({ selected: { ...current, sweep: { ...current.sweep, preview: made } }, merged: { id: photo.id, ...made } });
+  update({ selected: { ...current, sweep: { ...current.sweep, preview: made } } });
   showPhoto(read().selected);
+  update({ merged: { id: photo.id, ...made } });
 }
 
 function showPhoto(photo) {
@@ -1459,7 +1472,7 @@ function renderLoupe(photo) {
   const caption = document.querySelector('[data-loupe-caption]');
   caption.textContent = stand ? `Merged from ${numbered(frames, 'frame')} \u00b7 the Panorama fact shows the frame` : '';
   caption.hidden = !stand;
-  if (stand) document.querySelector('[data-loupe-hint]').hidden = true;
+  document.querySelector('[data-loupe-hint]').hidden = Boolean(stand) || !teaching;
   const note = document.querySelector('[data-loupe-note]');
   const { state, said } = presence(photo, Boolean(source));
   note.textContent = state === 'here' ? '' : said;
@@ -1837,6 +1850,9 @@ function renderChrome(state) {
 }
 
 function render(state) {
+  // The merge stands in only while the loupe is up: a chip, a name, a
+  // folder or an album can leave the loupe without closing it.
+  if (state.view !== 'loupe' && state.merged) { update({ merged: null }); return; }
   // Chrome first: it is what shows and hides the grid, and a grid laid out
   // while still hidden measures a zero-width column.
   renderChrome(state);
@@ -1915,15 +1931,15 @@ document.addEventListener('click', (event) => {
   if (action === 'export-folder') {
     const folder = folderMenu.dataset.folder || '';
     folderMenu.hidden = true;
-    update({ doing: 'Saving metadata for Lightroom…' });
+    const done = busy('Saving metadata for Lightroom…');
     product.exportFolder(folder).then((said) => {
       const parts = [];
       if (said.written) parts.push(`${said.written.toLocaleString()} written`);
       if (said.unchanged) parts.push(`${said.unchanged.toLocaleString()} already current`);
       if (said.missing) parts.push(`${said.missing.toLocaleString()} not here`);
-      update({ doing: '' });
+      done();
       notify(`Metadata for Lightroom: ${parts.join(', ') || 'nothing to write'}.`);
-    }).catch((error) => { update({ doing: '' }); notify(why(error)); });
+    }).catch((error) => { done(); notify(why(error)); });
   }
   if (action === 'adopt-track') {
     folderMenu.hidden = true;
@@ -2413,7 +2429,7 @@ function commands(query) {
     const action = node.dataset.action;
     // A control that rewrote its tooltip (Cancel or Back; merge, open or
     // frame) is offered in its own words.
-    const tip = node.title || TIPS[action];
+    const tip = (node.title || TIPS[action] || '').replace(/ \([^()]*\)$/, '');
     if (!tip || seen.has(action) || !onScreen(node)) continue;
     if (want && !tip.toLowerCase().includes(want)) continue;
     seen.add(action);

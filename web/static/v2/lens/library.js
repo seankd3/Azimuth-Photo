@@ -594,12 +594,12 @@ function renderInspector(panel, selected, actions = {}) {
     const cell = element('dd', 'sweep-cell');
     const strip = element('button', 'sweep-strip');
     strip.type = 'button';
-    strip.title = 'Open the merged preview';
+    strip.title = actions.merged?.id === selected.id ? 'The merge, shown in the loupe' : 'Open the merged preview';
     const picture = element('img');
     picture.src = selected.sweep.preview.url;
     picture.alt = 'The merged panorama';
     strip.append(picture);
-    strip.addEventListener('click', () => actions.mergeSweep(selected));
+    strip.addEventListener('click', () => actions.mergeSweep(selected, true));
     cell.append(strip);
     facts.append(cell);
   }

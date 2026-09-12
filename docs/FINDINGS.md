@@ -826,6 +826,11 @@ finding was checked and the numbers said no.
 | X182 | Size at its top end made a stage cell wider than the pane at the minimum window | a cell is never wider than the pane | shipped |
 | X183 | The loupe caption shared its band with the first-open hint | the caption keeps to its corner with a width; the hint yields while a merge is shown | shipped |
 | X184 | The grouped projection listed a key once per row that carried it, so two rows of one identity were written by two statements and counted twice (the suite's reindex test caught it; committed past a red suite, which is its own lesson) | each key once, in the rows' order | shipped |
+| X185 | The merge survived every way out of the loupe but Esc (a chip, a name, a folder, an album), so Enter on the frame later showed the merge unasked | the render clears it whenever the view is not the loupe | shipped |
+| X186 | The command line, reading tooltips now, printed every key twice ("… (Tab)" and the Tab cap) | the tooltip's key suffix is dropped for the label | shipped |
+| X187 | The strip said "Open the merged preview" and, with the merge shown, closed it (the fact's toggle) | the strip only opens, and says "The merge, shown in the loupe" while it is | shipped |
+| X188 | `doing` had three owners: a merge finishing blanked a running export's line (and the reverse) | a job clears only the word it said (`busy`) | shipped |
+| X189 | The first-open hint, hidden for a merge, never came back that session | it yields to the merge and returns with the frame while the loupe is still teaching | shipped |
 | X174 | `cache.evict` protects only the never-evict kinds it is handed; a caller with a partial tuple would have a never-evict kind's rows and files taken (the worker hands every kind, so unreachable today; the X166 test uses a partial tuple by fixture) | held: the worker is the one caller and is handed every kind | held |
 
 ## Refutation of D1-D5, PF4, PF5, E2-3 (2026-09-12, by a second model)
