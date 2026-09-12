@@ -65,7 +65,7 @@ def main(argv: list[str]) -> int:
     # The budgets, in ms on a 150k catalog with the machine at rest: a row
     # over its budget is printed OVER, and `--budget` makes that a failure.
     BUDGET = {"photos": 40, "size everything": 30, "size folder": 5, "days everything": 200, "days folder": 10,
-              "position": 80, "counts": 30, "stacks.stack": 20, "stacks.unstack": 20, "facets_of": 1500,
+              "position": 80, "counts": 30, "stacks.stack": 20, "stacks.unstack": 20, "cull.pick+undo (page": 150, "cull.pick+undo (folder": 3000, "facets_of": 1500,
               "stacks.project": 1500, "folder_tree": 1500, "search": 200, "rank.candidates": 150,
               "rank.uncertain": 4000, "rank.progress": 150, "work.owed": 10}
     over = []
@@ -108,6 +108,20 @@ def main(argv: list[str]) -> int:
     if len(ids) == 3:
         row("stacks.stack (3 frames)", lambda: stacks.stack(conn, ids))
         row("stacks.unstack (cover)", lambda: stacks.unstack(conn, ids[:1]))
+    # A cull verb over a page and over a folder, and each undone: what
+    # Select All then P costs, on the copy.
+    from model import cull
+
+    page = [r[0] for r in conn.execute(
+        "SELECT id FROM images WHERE tail IS NOT NULL AND content_hash IS NOT NULL AND status != 'trashed' ORDER BY id LIMIT 500")]
+    folder = [r[0] for r in conn.execute(
+        "SELECT id FROM images WHERE tail IS NOT NULL AND content_hash IS NOT NULL AND status != 'trashed' AND tail GLOB ?",
+        (prefix + "/*",))]
+    for name, chosen in (("page of 500", page), (f"folder of {len(folder):,}", folder)):
+        if not chosen:
+            continue
+        said = {}
+        row(f"cull.pick+undo ({name})", lambda c=chosen, s=said: s.update(cull.pick(conn, c)) or cull.undo(conn, s["changed"]))
     conn.close()
     if "--budget" in argv and over:
         print(f"over budget: {', '.join(over)}")
