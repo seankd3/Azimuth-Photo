@@ -637,6 +637,39 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
     }
   }
 
+  const numberFor = (index) => (index + 1 === 10 ? '0' : index + 1 === 11 ? '-' : index + 1 === 12 ? '=' : String(index + 1));
+
+  function cardFor(photo, index) {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'rank-card';
+    card.dataset.index = index;
+    card.dataset.hash = photo.hash;
+    card.dataset.turn = photo.rotate || 0;
+    card.setAttribute('aria-label', `Pick ${photo.tail.split('/').pop()}`);
+    // Paint what is decoded now: the warmed bitmap when it is ready, else
+    // the grid tile, with the wide loupe swapped in the moment its decode
+    // lands. Nothing a pick shows waits on a 4,096 px decode.
+    const want = sourceFor(photo);
+    const warmed = photo.warm && photo.warmFor === want && photo.ready;
+    const image = warmed ? photo.warm : document.createElement('img');
+    image.alt = '';
+    image.decoding = 'async';
+    if (!warmed) {
+      const first = photo.tile || want;
+      image.src = first;
+      if (want !== first) {
+        (photo.warm && photo.warmFor === want ? photo.warm.decode() : preload(photo))
+          .then(() => { if (image.isConnected) image.src = want; })
+          .catch(() => {});
+      }
+    }
+    const number = document.createElement('kbd');
+    number.textContent = numberFor(index);
+    card.append(image, number);
+    return card;
+  }
+
   function render() {
     if (!isOpen()) {
       stage.replaceChildren();
@@ -657,35 +690,28 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
       renderProgress();
       return;
     }
-    stage.replaceChildren(...state.set.map((photo, index) => {
-      const card = document.createElement('button');
-      card.type = 'button';
-      card.className = 'rank-card';
-      card.dataset.index = index;
-      card.dataset.turn = photo.rotate || 0;
-      card.setAttribute('aria-label', `Pick ${photo.tail.split('/').pop()}`);
-      // Paint what is decoded now: the warmed bitmap when it is ready, else
-      // the grid tile, with the wide loupe swapped in the moment its decode
-      // lands. Nothing a pick shows waits on a 4,096 px decode.
-      const want = sourceFor(photo);
-      const warmed = photo.warm && photo.warmFor === want && photo.ready;
-      const image = warmed ? photo.warm : document.createElement('img');
-      image.alt = '';
-      image.decoding = 'async';
-      if (!warmed) {
-        const first = photo.tile || want;
-        image.src = first;
-        if (want !== first) {
-          (photo.warm && photo.warmFor === want ? photo.warm.decode() : preload(photo))
-            .then(() => { if (image.isConnected) image.src = want; })
-            .catch(() => {});
-        }
+    // A card stays for a photograph that stays. A rebuilt card is a new
+    // <img> that paints black until its bitmap lands and runs the arrival
+    // again, so every pick flashed the whole set (the owner, 09-12: "every
+    // click causes all the images to flash black"). Only the slots that
+    // changed are touched; the rest are not so much as moved.
+    const standing = [...stage.children];
+    if (standing.some((node) => !node.classList.contains('rank-card'))) {
+      stage.replaceChildren();
+      standing.length = 0;
+    }
+    state.set.forEach((photo, index) => {
+      const have = standing[index];
+      if (have && have.dataset.hash === photo.hash) {
+        have.dataset.index = index;
+        have.dataset.turn = photo.rotate || 0;
+        have.querySelector('kbd').textContent = numberFor(index);
+        return;
       }
-      const number = document.createElement('kbd');
-      number.textContent = index + 1 === 10 ? '0' : index + 1 === 11 ? '-' : index + 1 === 12 ? '=' : String(index + 1);
-      card.append(image, number);
-      return card;
-    }));
+      const card = cardFor(photo, index);
+      if (have) have.replaceWith(card); else stage.append(card);
+    });
+    for (const extra of standing.slice(state.set.length)) extra.remove();
     layout();
     renderSelection();
     renderProgress();
