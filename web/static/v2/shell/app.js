@@ -141,6 +141,7 @@ function renderStrip(state) {
     signature += photo ? `|${photo.id}.${photo.tile ? photo.tile.slice(-12) : 0}.${photo.status}.${photo.rotate}` : '|·';
   }
   const rebuilt = signature !== stripKey;
+  const hadFocus = loupeStrip.contains(document.activeElement);
   if (rebuilt) {
     stripKey = signature;
     const cells = [];
@@ -152,6 +153,9 @@ function renderStrip(state) {
       cell.dataset.index = index;
       cell.setAttribute('role', 'option');
       cell.tabIndex = index === current ? 0 : -1;
+      // Every option says where it stands, so the listbox reads as one
+      // instead of one selected cell among cells that say nothing.
+      cell.setAttribute('aria-selected', 'false');
       cell.dataset.turn = photo?.rotate || 0;
       cell.setAttribute('aria-label', photo?.tail || `Photograph ${index + 1}`);
       if (photo?.tile) {
@@ -163,7 +167,6 @@ function renderStrip(state) {
       }
       cells.push(cell);
     }
-    const hadFocus = loupeStrip.contains(document.activeElement);
     loupeStrip.replaceChildren(...cells);
     // A rebuild under the keyboard keeps the keyboard: focus lands on the
     // current cell instead of falling to the body.
@@ -183,6 +186,10 @@ function renderStrip(state) {
     cell.classList.add('is-current');
     cell.tabIndex = 0;
     cell.setAttribute('aria-selected', 'true');
+    // The keyboard travels with the frame: an arrow that left focus on the
+    // old cell showed two framed cells and moved the selection on an option
+    // nobody was on. A keyboard elsewhere (a field, the grid) stays there.
+    if (moved && hadFocus && document.activeElement !== cell) cell.focus({ preventScroll: true });
     // The strip stays where it is while the current frame is in view; it
     // recentres only when the frame has left the band (or the strip is new).
     const left = cell.offsetLeft - loupeStrip.scrollLeft;
@@ -678,7 +685,7 @@ function visibleGrid() {
         : inAlbum
           ? (shelf.smart
             ? 'No photographs match its filters yet — they join as they qualify.'
-            : 'Drag photos onto its name, or right-click any photo anywhere in the library.')
+            : 'Drag photographs onto its name, or right-click any photograph anywhere in the library.')
           : searching
             ? 'Try fewer words, or a different idea — meaning works too, not just names.'
             : inFolder
@@ -1059,7 +1066,7 @@ const forgetItem = folderMenu.querySelector('[data-action="forget-missing"]');
 function disarmForget() {
   delete forgetItem.dataset.armed;
   forgetItem.classList.remove('is-armed');
-  forgetItem.textContent = 'Forget missing photos…';
+  forgetItem.textContent = 'Forget missing photographs…';
 }
 async function forgetMissing(folder) {
   const where = folder || '*';
@@ -1754,21 +1761,6 @@ function renderChrome(state) {
   document.querySelector('[data-rank-mode]').hidden = !ranking;
   document.querySelector('[data-action="rank"]').hidden = state.view !== 'library' || searching;
   document.querySelector('[data-action="leave-rank"]').hidden = !ranking;
-  // A view change hands the keyboard to the stage that arrived, so the
-  // focus never falls to the body and the change is heard.
-  if (state.view !== viewShown) {
-    viewShown = state.view;
-    say({ library: 'Library', trash: 'Trash', rank: 'Rank', loupe: 'Loupe', people: 'People', import: 'Import' }[state.view] || state.view);
-    const stage = ranking ? document.querySelector('[data-rank]')
-      : holding ? loupe
-        : walled ? document.querySelector('[data-people-stage]')
-          : intaking ? null
-            : grid;
-    if (stage && !stage.contains(document.activeElement)) {
-      const first = stage.querySelector('.rank-card.is-selected, .face-card.is-focus, .strip-cell.is-current, .photo-cell.is-selected, .photo-cell');
-      (first || stage).focus({ preventScroll: true });
-    }
-  }
   document.querySelector('[data-result-label]').hidden = ranking || holding || walled || intaking;
   document.querySelector('[data-density]').closest('label').hidden = ranking || holding || walled;
   // The chips narrow the library view; Trash and the loupe are not places
@@ -1808,7 +1800,7 @@ function renderChrome(state) {
   const restorable = state.view === 'trash' && (state.marked?.size || state.selected);
   const restore = document.querySelector('[data-action="restore"]');
   restore.hidden = !restorable;
-  restore.textContent = state.marked?.size > 1 ? `Restore ${state.marked.size}` : 'Restore';
+  restore.textContent = state.marked?.size > 1 ? `Restore ${state.marked.size.toLocaleString()}` : 'Restore';
   document.querySelector('[data-action="empty-trash"]').hidden = state.view !== 'trash' || !state.counts.trash;
   document.querySelector('.nav-row[data-action="all-photos"]').classList.toggle('is-active', state.view === 'library' && !(state.folders || []).length);
   document.querySelector('.nav-row[data-action="trash-view"]').classList.toggle('is-active', state.view === 'trash');
@@ -1824,7 +1816,7 @@ function renderChrome(state) {
     : searching
       ? (state.query
         ? `Results for “${state.query}”${where ? ` in ${where}` : ''}`
-        : `More like ${(state.like || []).length === 1 ? 'this photo' : `${(state.like || []).length} photos`}`)
+        : `More like ${(state.like || []).length === 1 ? 'this photograph' : numbered((state.like || []).length, 'photograph')}`)
       : (ranking ? 'Rank · ' : '') + (where || 'All photographs');
   document.querySelector('[data-action="add-chip"]').hidden = state.view !== 'library' || ranking;
   // Export acts on the selection; without one there is nothing to offer.
@@ -1880,6 +1872,32 @@ function render(state) {
   // while still hidden measures a zero-width column.
   renderChrome(state);
   if (!['rank', 'loupe', 'import'].includes(state.view)) visibleGrid();
+  handoff(state);
+}
+
+// The keyboard never falls to the body. A view change hands it to the
+// stage that arrived, and the change is heard. A load hands it again: the
+// pass key, a folder, a chip or Esc un-narrowing rebuild the grid's rows,
+// and the cell that held the keyboard left with the old ones — so once the
+// rows have painted, the grid's one tab stop (the cursor, else the first
+// cell in view) takes it back, silently.
+function handoff(state) {
+  const changed = state.view !== viewShown;
+  if (changed) {
+    viewShown = state.view;
+    say({ library: 'Library', trash: 'Trash', rank: 'Rank', loupe: 'Loupe', people: 'People', import: 'Import' }[state.view] || state.view);
+  }
+  const stage = state.view === 'rank' ? document.querySelector('[data-rank]')
+    : state.view === 'loupe' ? loupe
+      : state.view === 'people' ? document.querySelector('[data-people-stage]')
+        : state.view === 'import' ? null
+          : grid;
+  const landed = stage === grid && !state.loading && document.activeElement === document.body;
+  if (stage && (changed || landed) && !stage.contains(document.activeElement)) {
+    const first = stage.querySelector('.photo-cell[tabindex="0"]')
+      || stage.querySelector('.rank-card.is-selected, .face-card.is-focus, .strip-cell.is-current, .photo-cell');
+    (first || stage).focus({ preventScroll: true });
+  }
 }
 
 driveForm.addEventListener('submit', async (event) => {

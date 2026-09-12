@@ -82,7 +82,19 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
       const parts = entry.name.split('/');
       place(entry, parts.length - 1, parts[parts.length - 1]);
     }
+    // The keyboard's row survives the rebuild, as in the folder tree: the
+    // same album refocused; after Delete, the row that took its place,
+    // else the Albums + button. Without this the verb lands and the focus
+    // falls to the body, where the next arrow goes nowhere.
+    const standing = tree.contains(document.activeElement) ? document.activeElement.dataset.album : null;
+    const seat = standing ? [...tree.children].indexOf(document.activeElement) : -1;
     tree.replaceChildren(...rows);
+    if (standing) {
+      const stop = rows.find((r) => r.dataset.album === standing)
+        || rows[Math.min(seat, rows.length - 1)]
+        || document.querySelector('[data-action="new-album"]');
+      stop?.focus({ preventScroll: true });
+    }
   }
 
   // ---- naming things: one small popover, one question ----
@@ -298,7 +310,9 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
   menu.addEventListener('click', async (event) => {
     const action = event.target.closest('[data-action]')?.dataset.action;
     const id = menu.dataset.album;
-    menu.hidden = true;
+    // Through hideMenu, so the focus goes back to the row that opened it
+    // rather than staying on a hidden menu item.
+    hideMenu(menu);
     if (!action || !id) return;
     try {
       if (action === 'rename-album') {
