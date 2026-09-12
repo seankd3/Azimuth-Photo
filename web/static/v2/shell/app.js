@@ -141,6 +141,7 @@ function renderStrip(state) {
     signature += photo ? `|${photo.id}.${photo.tile ? photo.tile.slice(-12) : 0}.${photo.status}.${photo.rotate}` : '|·';
   }
   const rebuilt = signature !== stripKey;
+  const hadFocus = loupeStrip.contains(document.activeElement);
   if (rebuilt) {
     stripKey = signature;
     const cells = [];
@@ -152,6 +153,9 @@ function renderStrip(state) {
       cell.dataset.index = index;
       cell.setAttribute('role', 'option');
       cell.tabIndex = index === current ? 0 : -1;
+      // Every option says where it stands, so the listbox reads as one
+      // instead of one selected cell among cells that say nothing.
+      cell.setAttribute('aria-selected', 'false');
       cell.dataset.turn = photo?.rotate || 0;
       cell.setAttribute('aria-label', photo?.tail || `Photograph ${index + 1}`);
       if (photo?.tile) {
@@ -163,7 +167,6 @@ function renderStrip(state) {
       }
       cells.push(cell);
     }
-    const hadFocus = loupeStrip.contains(document.activeElement);
     loupeStrip.replaceChildren(...cells);
     // A rebuild under the keyboard keeps the keyboard: focus lands on the
     // current cell instead of falling to the body.
@@ -183,6 +186,10 @@ function renderStrip(state) {
     cell.classList.add('is-current');
     cell.tabIndex = 0;
     cell.setAttribute('aria-selected', 'true');
+    // The keyboard travels with the frame: an arrow that left focus on the
+    // old cell showed two framed cells and moved the selection on an option
+    // nobody was on. A keyboard elsewhere (a field, the grid) stays there.
+    if (moved && hadFocus && document.activeElement !== cell) cell.focus({ preventScroll: true });
     // The strip stays where it is while the current frame is in view; it
     // recentres only when the frame has left the band (or the strip is new).
     const left = cell.offsetLeft - loupeStrip.scrollLeft;
