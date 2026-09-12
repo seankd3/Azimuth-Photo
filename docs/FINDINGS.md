@@ -130,6 +130,8 @@ finding was checked and the numbers said no.
 | D2 | An empty library offered Filter, Sort, Size and Rank over nothing | the bar keeps its height and loses its controls until the first photographs arrive; the one thing on screen is the way to add them (proven on an empty home and a full one) | shipped |
 | D3 | A local named like an imported helper silently shadowed it (`count`) and killed every view for an hour; fourteen other locals shadowed outer names without harm | the linter refuses a shadowed name (`no-shadow`); the kit helper is `numbered`; every shadow renamed | shipped |
 | E2-3 | The sharpness pass failed on real faces ("unknown C++ exception from OpenCV"): the BGR frame handed to the landmark model was a reversed-stride view | contiguous; failed rows are dropped at repair and re-owed; six of Sean's faces now measure (eyes open, per-face sharpness) | shipped |
+| D4 | A fault on the page was invisible: nothing kept it and nothing wrote it down | the window keeps every thrown handler and rejected promise and reports it to the log under the home (`report` verb); the proofs read the same list | shipped |
+| D5 | A built document could pass the linter and the suite and still draw nothing | `scripts/smoke_boot.py`: a home with four photographs, the built document opened over it as the desktop does, the grid asked how many cells it drew and what it caught; part of `azimuth-check` on a desktop; the round's rule in AGENTS.md | shipped |
 
 ## Search box and drop (second round, 2026-09-09)
 

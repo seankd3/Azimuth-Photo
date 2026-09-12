@@ -29,4 +29,10 @@ for spec in web/test_v2_*.mjs; do
     node "$spec"
 done
 "$PYTHON" scripts/rewrite_status.py --check
+# The build opens: a window over a small library draws it and throws nothing.
+# Needs a desktop; on a headless runner the bundle is checked by the specs.
+if [[ "${OS:-}" == "Windows_NT" && "${AZIMUTH_NO_WINDOW:-}" == "" ]]; then
+    "$PYTHON" scripts/build_desktop_ui.py >/dev/null
+    "$PYTHON" scripts/smoke_boot.py
+fi
 echo "azimuth-check: ok"

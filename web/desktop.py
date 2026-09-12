@@ -298,6 +298,15 @@ class Desktop:
 
     # ---- the home ----
 
+    def report(self, text: str) -> None:
+        """An error the window caught -- a thrown handler, a rejected
+        promise -- written to the log under the home, so a fault on the
+        page is read the same way as a fault in the product."""
+
+        import logging
+
+        logging.getLogger("azimuth.window").error("%s", str(text)[:2000])
+
     def version(self) -> dict:
         """Which build this is: the checkout's commit and when it was made,
         read from the repository's own files (no git process), or the

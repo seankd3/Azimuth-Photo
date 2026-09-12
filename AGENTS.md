@@ -159,7 +159,8 @@ audit against HEAD (defects, duplications, and taste against
 `docs/ui-architecture.md`) refills `docs/FINDINGS.md`; one hand lands the
 shared shape first and then the surfaces, one commit per row cluster with
 the row numbers in the subject; a different model refutes the diff before
-push; the native proof and `scripts/bench.py` carry the numbers. A medium
+push; the native proof and `scripts/bench.py` carry the numbers, and a
+built document lands only after `scripts/smoke_boot.py` has opened it. A medium
 or large fix states its one sentence and what it deletes in the commit. When
 the ledger runs dry, the next audit widens the lens (a persona, a catalog
 size, a surface) instead of stopping. Every round carries a performance lens

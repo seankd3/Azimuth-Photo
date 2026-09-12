@@ -56,7 +56,7 @@ STUB = r"""<script>
     return open ? [photos[0], ...members, ...photos.slice(1)] : photos;
   };
   const api = {
-    home: () => 'C:/harness/home', propose_home: () => 'C:/harness/home', settle_home: (p) => p, version: () => ({ commit: 'harness0', when: '12 Sep 2026' }),
+    home: () => 'C:/harness/home', propose_home: () => 'C:/harness/home', settle_home: (p) => p, version: () => ({ commit: 'harness0', when: '12 Sep 2026' }), report: () => null,
     counts: () => ({ photos: N, starred: 0, unidentified: 0, trash: 0 }),
     drives: () => [{ id: 1, uuid: 'u-1', root: 'C:/harness/photos', label: 'Harness', is_record: 0, attached: true, seen_at: 0 }],
     pulse: () => ({ done: 0, swept: 1, shaped: 0, cards: 0, doing: null, left: {} }),

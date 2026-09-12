@@ -23,6 +23,20 @@ import { icon } from '../kit/icons.js';
 import { createTimeline } from './timeline.js';
 import { numbered } from '../kit/words.js';
 
+// A fault on the page is read the same way as a fault in the product: kept
+// for the proofs to ask about, and written to the log under the home.
+window.__azimuthErrors = [];
+for (const [kind, said] of [
+  ['error', (event) => `${event.message} @ ${event.filename}:${event.lineno}`],
+  ['unhandledrejection', (event) => `unhandled: ${event.reason?.stack || event.reason}`],
+]) {
+  window.addEventListener(kind, (event) => {
+    const text = said(event);
+    window.__azimuthErrors.push(text);
+    try { product.report(text).catch(() => {}); } catch { /* the bridge is not up yet */ }
+  });
+}
+
 // A page is at least a viewport at the densest setting, so a 4K window
 // does not straddle three pages on every scroll frame; never past what the
 // library serves at once.
