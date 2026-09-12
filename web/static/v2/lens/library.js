@@ -247,7 +247,7 @@ function reconcileGrid(grid, state, actions, layout, range) {
       const why = where === 'here' ? '' : `, ${said.replace(/[.…]$/, '')}`;
       const stars = photo.stars > 0 ? `, ${numbered(photo.stars, 'star')}` : '';
       const stacked = photo.stack ? `, a stack of ${photo.stack + 1}` : '';
-      cell.setAttribute('aria-label', `${picked ? 'Picked, ' : ''}${photo.tail || `Photo ${photo.id}`}${stars}${stacked}${why}`);
+      cell.setAttribute('aria-label', `${picked ? 'Picked, ' : ''}${photo.tail || `Photograph ${photo.id}`}${stars}${stacked}${why}`);
       cell.setAttribute('aria-pressed', String(Boolean(state.marked?.has(photo.id))));
       if (index === state.selectedIndex) cell.setAttribute('aria-current', 'true');
       else cell.removeAttribute('aria-current');
@@ -442,7 +442,7 @@ function renderInspector(panel, selected, actions = {}) {
       ['Loaded', rows.length < marked.size ? `${rows.length.toLocaleString()} of them on hand` : ''],
       ['Taken', days.length ? (days[0] === days.at(-1) ? title(days[0]) : `${title(days[0], { weekday: false })} – ${title(days.at(-1), { weekday: false })}`) : ''],
       ['Cameras', cameras.join(' · ')],
-      ['Cull', [tally.picked && `${tally.picked} picked`, tally.unflagged && `${tally.unflagged} unflagged`].filter(Boolean).join(' · ')],
+      ['Cull', [tally.picked && `${tally.picked} picked`, tally.unflagged && `${tally.unflagged} unflagged`, tally.trashed && `${tally.trashed} rejected`].filter(Boolean).join(' · ')],
       ['Size', rows.some((p) => p.file_size) ? `${(rows.reduce((n, p) => n + (p.file_size || 0), 0) / 1e9).toFixed(2)} GB` : ''],
     ];
     for (const [label, value] of said) if (value) facts.append(element('dt', '', label), element('dd', '', String(value)));
@@ -475,7 +475,7 @@ function renderInspector(panel, selected, actions = {}) {
   }
   const heading = element('div', 'inspector-heading');
   // The heading is the photograph's own name; the folder is a fact below.
-  heading.append(element('p', 'eyebrow', 'Photo'), element('h2', '', (selected.tail || 'Untitled').split('/').pop()));
+  heading.append(element('p', 'eyebrow', 'Photograph'), element('h2', '', (selected.tail || 'Untitled').split('/').pop()));
   const facts = element('dl', 'facts');
   // The score, with its provenance: earned from the rounds this photograph
   // was actually in, predicted by the taste direction where it was not, and
@@ -516,10 +516,10 @@ function renderInspector(panel, selected, actions = {}) {
   const rows = [
     ['Score', score ? stars + score : (stars ? stars.slice(0, -3) : ''), { said: true }],
     ['Edited', edited, { said: true }],
-    ['Names', (selected.names || []).join(' · ')],
+    ['Names', (selected.names || []).join(' · '), { people: selected.names || [] }],
     ['Cull', !selected.hash ? 'Reading…'
       : selected.status === 'picked' ? 'Picked' : selected.status === 'trashed' ? 'Rejected' : 'Unflagged', { said: true }],
-    ['Where', presence(selected, true).said, { said: true }],
+    ['Stored', presence(selected, true).said, { said: true }],
     ['Taken', selected.date_taken || unknown],
     ['Exposure', exposure || unknown],
     ['Camera', [selected.camera_make, selected.camera_model].filter(Boolean).join(' ') || unknown, { chip: selected.camera_model && { is: 'camera', values: [selected.camera_model] } }],
@@ -529,7 +529,8 @@ function renderInspector(panel, selected, actions = {}) {
     ['Eyes', { open: 'Open', closed: 'Closed', unsure: 'Cannot tell' }[selected.sharp?.eyes] || '', { said: true }],
     ['Panorama', selected.sweep
       ? `${numbered(selected.sweep.members.length, 'frame')} sweep ${selected.sweep.direction}, ${Math.round(selected.sweep.overlap * 100)}% overlap`
-        + (selected.stack_of || selected.stack ? '' : ' — S stacks them')
+        + (selected.sweep.preview ? ' \u2014 press to see the merge' : ' \u2014 press to merge a preview')
+        + (selected.stack_of || selected.stack ? '' : '; S stacks them')
       : '', { sweep: selected.sweep }],
     ['Dimensions', selected.width && selected.height ? `${selected.width} × ${selected.height}` : ''],
     ['Size', selected.file_size ? `${(selected.file_size / 1e6).toFixed(1)} MB` : ''],
@@ -548,6 +549,18 @@ function renderInspector(panel, selected, actions = {}) {
     // the fact or goes where it points.
     const control = element('button', 'fact', String(value));
     control.type = 'button';
+    if (how.people && actions.applyChip) {
+      // One control per person: each goes to every photograph of them.
+      cell.replaceChildren(...how.people.flatMap((name, at) => {
+        const person = element('button', 'fact is-link', name);
+        person.type = 'button';
+        person.title = `Show every photograph of ${name}`;
+        person.addEventListener('click', () => actions.applyChip({ is: 'person', values: [name] }));
+        return at ? [' \u00b7 ', person] : [person];
+      }));
+      facts.append(cell);
+      continue;
+    }
     if (how.folder && actions.showFolder) {
       control.classList.add('is-link');
       control.title = 'Browse this folder';
@@ -555,8 +568,10 @@ function renderInspector(panel, selected, actions = {}) {
     } else if (how.sweep && actions.mergeSweep) {
       // The sweep's preview: merged on the first press (seconds, off the
       // window's lane), opened in the loupe from then on. The strip below
-      // the facts is the same preview, small.
+      // the facts is the same preview, small. A verb the command line
+      // can find.
       control.classList.add('is-link');
+      control.dataset.action = 'merge-sweep';
       control.title = how.sweep.preview ? 'Open the merged preview' : 'Merge a preview of the sweep';
       control.addEventListener('click', () => actions.mergeSweep(selected));
     } else if (how.chip && actions.applyChip) {
@@ -566,19 +581,25 @@ function renderInspector(panel, selected, actions = {}) {
     } else {
       control.title = 'Copy';
       control.addEventListener('click', () => {
-        navigator.clipboard?.writeText(String(value)).then(() => actions.notify?.('Copied.')).catch(() => {});
+        (navigator.clipboard ? navigator.clipboard.writeText(String(value)) : Promise.reject(new Error('no clipboard')))
+          .then(() => actions.notify?.('Copied.')).catch(() => actions.notify?.('That could not be copied.'));
       });
     }
     cell.append(control);
     facts.append(cell);
   }
   if (selected.sweep?.preview && actions.mergeSweep) {
-    const strip = element('img', 'sweep-strip');
-    strip.src = selected.sweep.preview.url;
-    strip.alt = 'The merged panorama';
+    const cell = element('dd', 'sweep-cell');
+    const strip = element('button', 'sweep-strip');
+    strip.type = 'button';
     strip.title = 'Open the merged preview';
+    const picture = element('img');
+    picture.src = selected.sweep.preview.url;
+    picture.alt = 'The merged panorama';
+    strip.append(picture);
     strip.addEventListener('click', () => actions.mergeSweep(selected));
-    facts.append(strip);
+    cell.append(strip);
+    facts.append(cell);
   }
   panel.replaceChildren(heading, facts);
 }

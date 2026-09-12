@@ -88,8 +88,8 @@ button:focus-visible, input:focus-visible, select:focus-visible {
    photographs, and the little tab at the edge brings it back. */
 .app-shell.hide-left { --left: 0px; }
 .app-shell.hide-left .sidebar { display: none; }
-.app-shell.hide-right { --right: 0px; }
-.app-shell.hide-right .inspector { display: none; }
+.app-shell.hide-right:not(.is-intaking) { --right: 0px; }
+.app-shell.hide-right:not(.is-intaking) .inspector { display: none; }
 .app-shell.hide-top { --top: 0px; }
 .app-shell.hide-top .topbar { display: none; }
 .panel-tab {
@@ -814,7 +814,10 @@ button kbd { color: var(--text-3); font: var(--t-label)/1 var(--mono); }
 .facts .fact.is-link { cursor: pointer; text-decoration: underline dotted var(--line-strong); text-underline-offset: 3px; }
 .facts .fact:hover { color: var(--text); }
 .facts .fact:focus-visible { outline: 1px solid var(--focus); outline-offset: 2px; }
-.facts .sweep-strip { grid-column: 1 / -1; width: 100%; margin-top: 6px; border-radius: 3px; cursor: zoom-in; }
+.facts .sweep-cell { grid-column: 1 / -1; margin-top: 6px; }
+.facts .sweep-strip { all: unset; display: block; width: 100%; border-radius: 3px; cursor: zoom-in; }
+.facts .sweep-strip img { display: block; width: 100%; border-radius: 3px; }
+.facts .sweep-strip:focus-visible { outline: 1px solid var(--focus); outline-offset: 2px; }
 .glance-hint kbd { padding: 1px 6px; border: 1px solid var(--line-strong); border-radius: 3px; color: var(--text-2); font: var(--t-label)/1.5 var(--mono); }
 
 dialog { color: var(--text); }
@@ -979,7 +982,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
    sits in the inspector's seat, and the window's own chrome frames both. */
 .import-stage {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--cell, 190px), 1fr));
   gap: 10px;
   padding: 16px 20px 40px;
   align-content: start;
@@ -1191,15 +1194,29 @@ body:has(.loupe-stage:not([hidden]):not(.is-full)) .toast { bottom: calc(var(--s
   cursor: pointer;
 }
 .loupe-zoom:hover { color: var(--text); }
+.loupe-caption {
+  position: absolute;
+  right: 16px;
+  bottom: calc(var(--strip) + 12px);
+  z-index: 2;
+  margin: 0;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: rgb(20 21 24 / 75%);
+  color: var(--text-2);
+  font-size: var(--t-meta);
+}
+.loupe-stage.is-full .loupe-caption { bottom: 14px; }
 .edit-groups.is-waiting { opacity: .45; }
 .loupe-stage.is-full .loupe-zoom { bottom: 14px; }
 .loupe-stage .loupe-close { z-index: 2; position: absolute; top: 12px; right: 12px; background: rgb(20 21 24 / 75%); }
 .loupe-note { position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-2); font-size: var(--t-title); }
 
 @media (max-width: 1050px) {
-  .app-shell { --left: 210px; --right: 0px; }
+  .app-shell { --left: 210px; }
+  .app-shell:not(.is-intaking) { --right: 0px; }
   .topbar { grid-template-columns: 210px minmax(0, 1fr) auto; }
-  .inspector { display: none; }
+  .app-shell:not(.is-intaking) .inspector { display: none; }
 }
 /* the one live region for what an act said: present, never seen */
 .said { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

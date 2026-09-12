@@ -41,8 +41,9 @@ export function createUndo() {
       // what it does, and Ctrl+Z takes it the same way.
       button.textContent = label;
     }
-    // A notice without a way back leaves the live Undo where it is.
-    if (nextRevert) button.hidden = false;
+    // A notice without a way back keeps the live Undo for Ctrl+Z but not
+    // the button: the button is a promise about the words beside it.
+    button.hidden = !nextRevert;
     toast.hidden = false;
     // The words land once the toast is in the tree, so the live region
     // hears them: text set while hidden is often not announced.

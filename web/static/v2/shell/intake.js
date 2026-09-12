@@ -13,8 +13,9 @@ import { why } from '../kit/why.js';
 import { recall, remember } from '../kit/remembered.js';
 import { title as dayName } from '../kit/days.js';
 import { numbered } from '../kit/words.js';
+import { emptyState } from '../lens/library.js';
 
-export function createIntakeWorkflow({ product, notify, afterImport, progressed = () => {}, enter, leave, isShown, offer = () => {} }) {
+export function createIntakeWorkflow({ product, notify, afterImport, progressed = () => {}, say = () => {}, enter, leave, isShown, offer = () => {} }) {
   const title = document.querySelector('[data-import-title]');
   const sourceLine = document.querySelector('[data-import-source]');
   const stage = document.querySelector('[data-import-stage]');
@@ -119,6 +120,11 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     startButton.focus();
   }
 
+  // What the act did, for the live region: the count the summary shows.
+  function spoken() {
+    say(`${numbered(state.checked.size, 'photograph')} checked`);
+  }
+
   function rollName(group) {
     const roll = state.rolls[group || ''] || {};
     const said = (roll.name || '').trim() || roll.proposed || group || '';
@@ -134,9 +140,10 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     list.replaceChildren(...Object.entries(state.rolls).map(([group, roll]) => {
       const item = document.createElement('li');
       const where = document.createElement('span');
-      where.textContent = `${group || '(top)'} · ${roll.count} frames`;
+      where.textContent = `${group || 'The top folder'} \u00b7 ${numbered(roll.count, 'frame')}`;
       const name = document.createElement('input');
       name.value = roll.name;
+      name.placeholder = roll.proposed || '';
       name.dataset.group = group;
       name.setAttribute('aria-label', `Roll name for ${group || 'the top folder'}`);
       item.append(where, name);
@@ -164,6 +171,14 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     order = [];
     cells.clear();
     dayBoxes.clear();
+    if (!state.candidates.length) {
+      stage.replaceChildren(emptyState({
+        emptyTitle: 'Nothing here to import.',
+        emptyCopy: 'The card holds no photographs, or every one is already in the library.',
+      }));
+      selected = new Set();
+      return;
+    }
     wornChecked = new Set();
     wornSelected = new Set();
     const rows = [];
@@ -253,6 +268,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
   function render() {
     for (const button of document.querySelectorAll('[data-kind-choice] [data-kind]')) {
       button.classList.toggle('is-active', button.dataset.kind === state.kind);
+      button.setAttribute('aria-pressed', String(button.dataset.kind === state.kind));
     }
     document.querySelector('[data-kind-choice]').classList.toggle('is-asking', !state.kind);
     // Copy leaves the originals; Move takes each one only after its copy
@@ -320,7 +336,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     } catch (error) {
       // The panel's own line carries its own refusal, right beside the
       // button that asked.
-      progress.textContent = error.message;
+      progress.textContent = why(error, 'The import');
       state.running = false;
       startButton.hidden = false;
       stopButton.hidden = true;
@@ -527,9 +543,9 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
       cells.get(key)?.cell.scrollIntoView({ block: 'nearest' });
       return true;
     },
-    checkAll: () => { state.checked = new Set(state.candidates.map((c) => c.key)); syncChecks(); render(); },
-    checkNew: () => { state.checked = new Set(state.candidates.filter((c) => !c.suspect).map((c) => c.key)); syncChecks(); render(); },
-    checkNone: () => { state.checked = new Set(); syncChecks(); render(); },
+    checkAll: () => { state.checked = new Set(state.candidates.map((c) => c.key)); syncChecks(); render(); spoken(); },
+    checkNew: () => { state.checked = new Set(state.candidates.filter((c) => !c.suspect).map((c) => c.key)); syncChecks(); render(); spoken(); },
+    checkNone: () => { state.checked = new Set(); syncChecks(); render(); spoken(); },
     // Space over a selection: in or out together, the grid's toggle.
     toggleSelected: () => {
       if (!selected.size) return;
@@ -540,6 +556,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
       }
       syncChecks();
       render();
+      spoken();
     },
     isOpen: () => isShown(),
     running: () => state.running,

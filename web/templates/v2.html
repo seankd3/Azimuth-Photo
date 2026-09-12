@@ -13,12 +13,12 @@
     <button class="panel-tab tab-right" type="button" data-action="toggle-right" aria-label="Show or hide the right panel">›</button>
     <button class="panel-tab tab-top" type="button" data-action="toggle-top" aria-label="Show or hide the top bar">˄</button>
     <header class="topbar">
-      <button class="brand" type="button" data-action="all-photos" aria-label="All photos">
+      <button class="brand" type="button" data-action="all-photos" aria-label="All photographs">
         <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><g fill="none" stroke="currentColor"><circle cx="16" cy="16" r="13" stroke-width="1.2" opacity=".5"></circle><path d="M16 3v4M16 25v4M3 16h4M25 16h4" stroke-width="1.2" opacity=".5"></path><path d="M16 8.5 20.5 21 16 17.8 11.5 21Z" fill="var(--accent)" stroke="none"></path></g></svg>
         <span>Azimuth<span class="wm-dim"> Photo</span></span>
       </button>
       <div class="view-title">
-        <strong>All photos</strong>
+        <strong>All photographs</strong>
         <span data-photo-count aria-live="polite">—</span>
       </div>
       <div class="topbar-search">
@@ -37,7 +37,7 @@
       <section data-section="library">
         <button class="eyebrow" type="button">Library</button>
         <button class="nav-row is-active" type="button" data-action="all-photos" data-icon="landscape">
-          <span>All photos</span><span data-sidebar-count>—</span>
+          <span>All photographs</span><span data-sidebar-count>—</span>
         </button>
         <button class="nav-row" type="button" data-action="trash-view" data-icon="trash">
           <span>Trash</span><span data-trash-count>—</span>
@@ -123,14 +123,15 @@
         <button class="quiet-button" type="button" data-action="restore" hidden>Restore</button>
         <button class="danger-button" type="button" data-action="empty-trash" hidden>Empty Trash</button>
       </div>
-      <section class="photo-grid" data-grid aria-label="Photo library" aria-busy="true"></section>
+      <section class="photo-grid" data-grid aria-label="Photographs" aria-busy="true"></section>
       <section class="import-stage" data-import-stage aria-label="Photographs to import" hidden></section>
       <section class="rank-stage" data-rank aria-label="Rank" tabindex="-1" hidden></section>
       <section class="face-wall" data-people-stage aria-label="People" tabindex="-1" hidden></section>
-      <section class="loupe-stage" data-loupe aria-label="Photo preview" tabindex="-1" hidden>
+      <section class="loupe-stage" data-loupe aria-label="Photograph preview" tabindex="-1" hidden>
         <button class="loupe-close" type="button" data-action="close-loupe" data-icon-only="close" aria-label="Close preview"></button>
         <img data-loupe-image alt="">
         <p class="loupe-note" data-loupe-note hidden></p>
+        <p class="loupe-caption" data-loupe-caption hidden></p>
         <p class="loupe-hint" data-loupe-hint hidden><kbd>P</kbd> pick <kbd>X</kbd> reject <kbd>←</kbd><kbd>→</kbd> next <kbd>Z</kbd> 100% <kbd>G</kbd> grid</p>
         <div class="loupe-strip" data-loupe-strip role="listbox" aria-label="Nearby photographs"></div>
         <div class="crop-surface" data-crop hidden>
@@ -148,9 +149,9 @@
       </section>
     </main>
 
-    <aside class="inspector" aria-label="Photo information" data-inspector>
+    <aside class="inspector" aria-label="Details" data-inspector>
       <div data-inspector-facts>
-        <div class="inspector-empty">Select a photo to see its details.</div>
+        <div class="inspector-empty">Select a photograph to see its details.</div>
       </div>
       <section class="edit-panel" data-edit-panel hidden aria-label="Edit">
         <header class="edit-head">
@@ -168,7 +169,7 @@
         </header>
         <p class="import-source" data-import-source></p>
         <p class="eyebrow">These are</p>
-        <div class="kind-choice" data-kind-choice>
+        <div class="kind-choice" data-kind-choice role="group" aria-label="These are">
           <button type="button" data-kind="raws">Camera raws</button>
           <button type="button" data-kind="snapshots">Snapshots</button>
           <button type="button" data-kind="edits">Edits</button>

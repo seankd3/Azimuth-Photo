@@ -763,6 +763,30 @@ finding was checked and the numbers said no.
 |---|---|---|---|
 | D1 | Thirteen lines could read "1 photographs" (the drag badge, the sidebar count, the import source and summary, a person's count, the search-kept notice, Empty Trash's notice, the selection heading); twenty more spelled their own plural | one word in the kit, `count(n, one, many)`, used by every surface that says how many | shipped |
 
+## Import and inspector (seventh round, 2026-09-12 night, audited by a second model)
+
+| # | Finding | Fix | Status |
+|---|---|---|---|
+| IA1 | Under 1,050 px (the window's minimum is 900) the details column hides, and the import panel lives in it: a card came in with no source line, no Copy/Move and no Import button | the column stays while a card is in (`is-intaking` on the shell), at any width and through the right fold | shipped |
+| IA2 | A notice with no way back left the standing Undo button beside words it did not describe: reject forty, an import finishes, "1,240 imported" with an Undo that restores the forty | the button is a promise about the words beside it: hidden for a notice; Ctrl+Z keeps the live way back for its eight seconds | shipped |
+| IA3 | The loupe never said it was showing a merge (the chip's "Preview" is what an edit gets too), and the way back to the frame was undocumented | a caption beside the chip: "Merged from 4 frames · the Panorama fact shows the frame"; the fact toggles back; the picture's alt says what it is | shipped |
+| IA4 | "Merging the sweep…" was a toast that cleared in 3.5 s while the merge took longer, and the fact stayed pressable | work in progress goes to the status line and clears when it lands; a second press while it runs is nothing | shipped |
+| IA5 | The merge was reachable only by a tooltip on a line of text; the command line could not offer it | the sentence says the press ("— press to merge a preview" / "— press to see the merge"); the control is `merge-sweep` with its tip, so `>` finds it | shipped |
+| IA6 | "Photo" and "photograph" named the same thing in adjacent surfaces (the eyebrow, the empty state, three landmark labels, All photos) | one word: photograph | shipped |
+| IA7 | The Names fact copied "Ann · Bob" to the clipboard; a person could not be reached from it | one control per name; each narrows to every photograph of them (the Camera pattern) | shipped |
+| IA8 | "Where" (the drive) and "Place" (the capture location) both read as location | the drive row is Stored | shipped |
+| IA9 | The selection's Cull line counted the rejected and dropped them on the way to the screen | "12 rejected" joins the census | shipped |
+| IA10 | A roll could read "1 frames" and "(top)", and an emptied name hid the name that would be used | `numbered`, "The top folder", the proposed name as the placeholder | shipped |
+| IA11 | The command line offered "Cancel the import" for a button that says Back and cancels nothing | "Close the import panel" | shipped |
+| IA12 | The keys sheet listed four of the stage's seven keys | Shift+Arrows and Home/End, in the grid's words | shipped |
+| IA13 | The kind choice was a bare div of buttons: a screen reader heard no group and no chosen answer | a labelled group with `aria-pressed`, as Copy/Move already was | shipped |
+| IA14 | A card with nothing to bring in opened a blank black stage | the grid's empty state with the import's words | shipped |
+| IA15 | Checking photographs, the whole job of the stage, said nothing to the live region | each act says "12 photographs checked" | shipped |
+| IA16 | A copy that failed said nothing | "That could not be copied." | shipped |
+| IA17 | The import's own refusal printed the bridge's raw words beside the `why()` that exists to prevent it | `why(error, 'The import')` | shipped |
+| IA18 | The merged strip was a picture with a click handler: no keyboard, no role, an `img` inside a `dl` | a button in a `dd`, with the focus ring | shipped |
+| IA19 | The import stage was a fixed 190 px grid at 4K, and the Size slider was hidden while it was open | the stage lays out from the slider's own number (`--cell`); the slider stays | shipped |
+
 ## Refutation of X115-X128 and PN1 (2026-09-12, by a third model)
 
 | # | Finding | Fix | Status |

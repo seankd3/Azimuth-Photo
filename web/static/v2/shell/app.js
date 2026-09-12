@@ -354,6 +354,7 @@ const trashWorkflow = createTrashWorkflow({
 });
 const intakeWorkflow = createIntakeWorkflow({
   offer: (message, act, label) => undo.show(message, act, label),
+  say,
   product,
   notify,
   // Import is its own workspace: entering and leaving it is a view change
@@ -1396,16 +1397,32 @@ function teachLoupe() {
 // {id, url, width, height}. Cleared when the loupe closes, so Enter on the
 // frame shows the frame.
 let merged = null;
+let merging = null;
 
 async function mergeSweep(photo) {
+  // Pressed while the merge is shown: the frame again.
+  if (merged?.id === photo.id && loupeOpen()) {
+    merged = null;
+    renderLoupe(photo);
+    return;
+  }
   const held = photo.sweep?.preview;
   if (held) {
     merged = { id: photo.id, ...held };
     showPhoto(photo);
     return;
   }
-  notify('Merging the sweep\u2026');
-  const made = await product.mergePreview(photo.id).catch((error) => { notify(why(error)); return undefined; });
+  if (merging === photo.id) return;
+  merging = photo.id;
+  // Work in progress goes to the status line; the toast is for outcomes.
+  update({ importing: 'Merging the sweep\u2026' });
+  let made;
+  try {
+    made = await product.mergePreview(photo.id).catch((error) => { notify(why(error)); return undefined; });
+  } finally {
+    merging = null;
+    update({ importing: '' });
+  }
   if (made === null) notify('The frames could not be merged.');
   if (!made) return;
   const current = read().selected;
@@ -1440,15 +1457,20 @@ function renderLoupe(photo) {
   // edit begins -- Develop paints the frame, never the merge.
   if (editPanel.isOpen()) merged = null;
   const stand = merged && merged.id === photo.id ? merged : null;
+  const frames = stand ? (photo.sweep?.members?.length || 0) : 0;
   if (stand) photo = { ...photo, develop: true, loupe: stand.url, width: stand.width, height: stand.height };
   const source = photo.loupe || photo.tile || '';
+  // The caption says it is the merge, and how the frame comes back.
+  const caption = document.querySelector('[data-loupe-caption]');
+  caption.textContent = stand ? `Merged from ${numbered(frames, 'frame')} \u00b7 the Panorama fact shows the frame` : '';
+  caption.hidden = !stand;
   const note = document.querySelector('[data-loupe-note]');
   const { state, said } = presence(photo, Boolean(source));
   note.textContent = state === 'here' ? '' : said;
   note.hidden = Boolean(source);
   // An <img> with no source still renders its alt text; while the note is
   // the whole message, the img says nothing.
-  loupeImage.alt = source ? (photo.tail || 'Selected photo') : '';
+  loupeImage.alt = source ? (stand ? 'The merged panorama' : (photo.tail || 'Selected photograph')) : '';
   if (source) loupeView.show(photo, source);
   else {
     // Passing a not-yet-made neighbour keeps the mode: a sharpness run
@@ -1684,6 +1706,9 @@ function renderChrome(state) {
   shell.classList.toggle('hide-left', !state.panels.left);
   shell.classList.toggle('hide-right', !state.panels.right);
   shell.classList.toggle('hide-top', !state.panels.top);
+  // The import panel lives in the details column and is the way to press
+  // Import: the column stays while a card is in, at any width.
+  shell.classList.toggle('is-intaking', intaking);
   loupe.hidden = !holding;
   // The strip measures itself to centre the current frame: laid out only
   // once the stage is shown, so the first centring is a real one.
@@ -1718,7 +1743,7 @@ function renderChrome(state) {
     }
   }
   document.querySelector('[data-result-label]').hidden = ranking || holding || walled || intaking;
-  document.querySelector('[data-density]').closest('label').hidden = ranking || holding || walled || intaking;
+  document.querySelector('[data-density]').closest('label').hidden = ranking || holding || walled;
   // The chips narrow the library view; Trash and the loupe are not places
   // to edit them, so they leave with their + button.
   document.querySelector('[data-chips]').hidden = state.view === 'trash' || holding || walled || intaking;
@@ -1773,7 +1798,7 @@ function renderChrome(state) {
       ? (state.query
         ? `Results for “${state.query}”${where ? ` in ${where}` : ''}`
         : `More like ${(state.like || []).length === 1 ? 'this photo' : `${(state.like || []).length} photos`}`)
-      : (ranking ? 'Rank · ' : '') + (where || 'All photos');
+      : (ranking ? 'Rank · ' : '') + (where || 'All photographs');
   document.querySelector('[data-action="add-chip"]').hidden = state.view !== 'library' || ranking;
   // Export acts on the selection; without one there is nothing to offer.
   document.querySelector('[data-action="export"]').hidden =
@@ -2346,7 +2371,7 @@ const SHORTCUTS = [
     ['[ / ]', 'Fewer or more at once'], ['M', 'How the set is drawn'],
   ]],
   ['Crop', [['Arrows', 'Nudge 1%'], ['Shift+Arrows', 'Nudge 5%'], ['Alt+Arrows', 'Grow or shrink'], ['0', 'Remove the crop'], ['Enter', 'Apply']]],
-  ['Import', [['Arrows', 'Move'], ['Space', 'Check or uncheck'], ['Ctrl+A', 'Select all'], ['Enter', 'Import']]],
+  ['Import', [['Arrows', 'Move'], ['Shift+Arrows', 'Extend the selection'], ['Home / End', 'First / last'], ['Space', 'Check or uncheck'], ['Ctrl+A', 'Select all'], ['Enter', 'Import']]],
   ['Trash', [['U', 'Restore', ['restore']]]],
   ['Folders', [['Arrows', 'Walk; Left and Right fold and open'], ['Home / End', 'First / last'], ['Amber dot', 'Only on the working disk'], ['Hollow ring', 'The record drive is away']]],
   ['Teaching', [['Y / N', 'This is / is not the word']]],
@@ -2362,7 +2387,7 @@ const TIPS = {
   'all-photos': 'All photographs', 'trash-view': 'Trash', 'new-album': 'New album\u2026', 'collapse-stacks': 'Fold or open every stack',
   'crop-reset': 'Remove the crop', 'crop-cancel': 'Leave the crop as it was', 'crop-apply': 'Apply the crop',
   'edit-reset': 'Reset the edit', 'edit-close': 'Close Develop',
-  'import-card': 'Import the card\u2026', 'close-import': 'Cancel the import', 'check-new': 'Check only the new photographs',
+  'import-card': 'Import the card\u2026', 'close-import': 'Close the import panel', 'merge-sweep': 'Merge a preview of the sweep', 'check-new': 'Check only the new photographs',
   'check-all': 'Check every photograph', 'check-none': 'Uncheck everything', 'start-import': 'Import the checked photographs', 'stop-import': 'Stop the import',
   'change-home': 'Change where the library lives\u2026', 'close-drive': 'Close', 'close-empty': 'Close', 'close-export': 'Close',
   'synchronize-folder': 'Synchronize this folder with the disk', 'forget-missing': 'Forget the missing photographs\u2026',
@@ -2463,11 +2488,14 @@ document.querySelector('[data-sort]').addEventListener('change', async (event) =
 
 const density = document.querySelector('[data-density]');
 density.value = rowHeight;
+// The import stage lays itself out in CSS from the same number.
+shell.style.setProperty('--cell', `${rowHeight}px`);
 density.addEventListener('input', (event) => {
   // The lens anchors the first visible cell across the re-layout itself; a
   // selection, when there is one, is what the person is looking at.
   rowHeight = Number(event.target.value);
   remember(DENSITY_KEY, rowHeight);
+  shell.style.setProperty('--cell', `${rowHeight}px`);
   visibleGrid();
   if (read().selectedIndex !== null) {
     scrollIndexIntoView(read().selectedIndex);
