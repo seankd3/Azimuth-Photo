@@ -180,6 +180,12 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
     state.buffer = [];
     update({ view: 'library' });
     await onLeave();
+    // Leaving layers out one surface: the keyboard goes back to the grid's
+    // cursor cell, rebuilt by onLeave(), or to the Rank button that opened
+    // the sitting, never to the body.
+    if (document.body.contains(document.activeElement) && document.activeElement !== document.body) return;
+    const back = document.querySelector('.photo-cell[tabindex="0"]') || document.querySelector('[data-action="rank"]');
+    back?.focus({ preventScroll: true });
   }
 
   async function resize(n) {
