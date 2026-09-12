@@ -5,7 +5,9 @@ bracket -- and the library keeps it as one decision per member naming the
 cover. Nothing is stacked for you: a machine that guesses at sets over-groups
 a walk into a set and hides the frame you wanted. What the machine keeps is
 the *proposal*: press S on one frame and the cadence law below says which
-neighbours belong with it, and that becomes the stack.
+neighbours belong with it, and that becomes the stack. A sweep -- frames
+that overlap one way, `panorama.py` -- is the other proposal S knows, for
+frames that keep no beat.
 
 The cadence law. Only a machine -- a drive mode, an intervalometer -- or a
 deliberate hand produces a *beat*, so regularity is the test: four or more
@@ -113,10 +115,11 @@ def _timed(when: str | None) -> dt.datetime | None:
         return None
 
 
-def around(conn, photo_id: int) -> list[int]:
+def around(conn, photo_id: int, tiles=None) -> list[int]:
     """The frames the cadence law puts with this one, in capture order --
-    what S proposes on a lone frame. Just the frame itself when it keeps no
-    beat with its neighbours."""
+    what S proposes on a lone frame; failing a beat, the sweep the frame
+    is part of (given the tiles to look at). Just the frame itself when it
+    keeps no beat and sweeps nowhere."""
 
     row = conn.execute("SELECT date_taken FROM images WHERE id = ?", (int(photo_id),)).fetchone()
     when = _timed(row["date_taken"]) if row else None
@@ -141,17 +144,23 @@ def around(conn, photo_id: int) -> list[int]:
     for first, last in runs(times):
         if first <= at <= last:
             return ids[first:last + 1]
+    if tiles is not None:
+        import panorama
+
+        sweep = panorama.of(conn, tiles, int(photo_id))
+        if sweep:
+            return list(sweep["members"])
     return [int(photo_id)]
 
 
-def stack(conn, photo_ids) -> dict:
+def stack(conn, photo_ids, tiles=None) -> dict:
     """Make one stack of these photographs -- one of them means the cadence
-    run around it. The earliest frame is the cover; the rest sit behind it,
-    one decision each. Returns the cover and the members."""
+    run around it, or the sweep. The earliest frame is the cover; the rest
+    sit behind it, one decision each. Returns the cover and the members."""
 
     wanted = [int(i) for i in photo_ids]
     if len(wanted) == 1:
-        wanted = around(conn, wanted[0])
+        wanted = around(conn, wanted[0], tiles)
     marks = ",".join("?" for _ in wanted)
     rows = conn.execute(
         f"SELECT id, content_hash FROM images WHERE id IN ({marks}) AND content_hash IS NOT NULL"

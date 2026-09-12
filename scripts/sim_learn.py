@@ -118,6 +118,9 @@ def choose_greedy(mu, sigma, avoid, n):
 
 
 def session(strategy, seed):
+    import random
+
+    random.seed(seed)   # the shipped draws use the global generator
     conn, hashes, hidden, space, rng = build(seed)
     index = {h: i for i, h in enumerate(hashes)}
     recent = []
@@ -133,7 +136,7 @@ def session(strategy, seed):
                 # E4: the shipped mixture (teach by the widest window, find
                 # at the band's cut, a coin once there are leaders) with the
                 # fit's own uncertainty instead of 1/sqrt(1+rounds).
-                unsure = rank.uncertainty(rank.rounds(conn), {h: mu[index[h]] for h in hashes})
+                unsure = rank.fitted(rank.rounds(conn))[1]
                 sigma = np.asarray([unsure.get(h, 1.0 / np.sqrt(rank.LAM_B)) for h in hashes])
                 judged_n = int((appearances > 0).sum())
                 if judged_n >= 2 * SET and rng.random() < 0.5:

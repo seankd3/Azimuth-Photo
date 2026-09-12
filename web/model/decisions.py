@@ -107,6 +107,41 @@ def loaded(row) -> Any:
         return None
 
 
+def decide_many(conn, family: str, said: list[tuple[str, Any]], *, by: str = YOU) -> list[int]:
+    """Append one decision per subject in one statement; their ids, in order.
+
+    The same guards as `decide`, and the write lock taken before the ids are
+    read (BEGIN IMMEDIATE), so no other writer can slip a row in between the
+    count and the insert -- which would have made the ids come back wrong.
+    """
+
+    if not family:
+        raise ValueError("a decision needs a family")
+    by = str(by).strip().lower()
+    if by not in AUTHORS:
+        raise ValueError(f"unknown decision author: {by!r}")
+    rows = []
+    for subject, value in said:
+        subject = str(subject).strip()
+        if not subject:
+            raise ValueError("a decision needs a subject")
+        rows.append((subject, str(family), json.dumps(value)))
+    if not rows:
+        return []
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+    first = int(conn.execute("SELECT COALESCE(MAX(id), 0) FROM decisions").fetchone()[0])
+    now = time.time()
+    conn.executemany(
+        "INSERT INTO decisions(subject, family, value, at, by) VALUES (?, ?, ?, ?, ?)",
+        [(subject, held, value, now, by) for subject, held, value in rows],
+    )
+    ids = [int(row[0]) for row in conn.execute("SELECT id FROM decisions WHERE id > ? ORDER BY id", (first,))]
+    if len(ids) != len(rows):
+        raise RuntimeError("the decisions written do not match the decisions made")
+    return ids
+
+
 def latest(conn, subject: str, family: str) -> Any:
     """What you last said about this subject, or None if you never did.
 

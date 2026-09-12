@@ -615,7 +615,7 @@ finding was checked and the numbers said no.
 | BC10 | Each Rank draw pays two COUNT(DISTINCT) scans and a second parse of the round log: ~300 ms | seen()/rounds() memoised on the log's head; progress per sitting | shipped: 0.2 ms after the first draw |
 | BC11 | rank.space() peaks at twice the matrix (~1.4 GB) while loading | counted first, one matrix allocated, filled row by row from the cursor; measured on 20k synthetic vectors: peak 194 MB → 93 MB, same time | shipped |
 | BC12 | owed()'s on_screen ORDER BY is dead in the product and costs 886 ms when used | deleted; the docstring says closeness is the scoped first pass | shipped |
-| BC13 | Ctrl+A at 150k ships 148,000 ids across the bridge and back on every verb | measured: the ids are 1 MB and 25 ms round trip; the verb itself was 29.5 s (one decision row and one update per photograph in a loop) and its undo 32 s. Now one read of every subject's last word, one insert for the decisions, one write per distinct value: 7 s and 7 s; a turn of 20k in 1 s. The transport stays | shipped |
+| BC13 | Ctrl+A at 150k ships 148,000 ids across the bridge and back on every verb | measured: the ids are 1 MB and 25 ms round trip; the verb itself was one decision row and one update per photograph in a Python loop. Now one window read of every subject's last word, one insert under the write lock, one sliced projection: at 148k on this machine reject 29.5 → 11.9 s, undo 32 → 23 s, restore 28 s, a page of 500 in 83 ms. Still tens of seconds for a whole library — a verb by scope with a count back remains the answer, its own round | shipped, open |
 | BC14 | The follower notices no card and no drive for the whole first archive sweep | the sweep not awaited inside the loop | shipped |
 | BC15 | Pending cells repaint continuously: background animated, a paint per cell per frame | opacity on the veil | shipped |
 | BC16 | The bench has no row for the verbs found slow; PERF_BUDGETS.md says no V2 bench exists | rows added, budgets per shape, the doc names the bench | shipped: plus a filename index (page at depth 96 → within budget) |
@@ -744,14 +744,14 @@ finding was checked and the numbers said no.
 | E2-2 | Eyes: open/closed/can't tell, and each eye's own sharpness | the 106-landmark model buffalo_l already ships runs in the sharpness pass on each face over 48 px; each eye's contour height over width is its openness and Zhu–Milanfar on the padded eye crop its sharpness; the photograph's word is the largest face's, said only when both eyes are readable and agree (open ≥ 0.25, closed ≤ 0.15, else Cannot tell); the inspector says it; OCEC left out (the contour alone read every proof face; add it only if E5 shows blinks slipping through) | shipped |
 | E1 | The head was two fits in a row: strengths from the rounds, then a ridge direction fitted to those strengths, blended back by a trust weight | one Plackett–Luce fit over every round learns the direction and each photograph's residual together (`rank.fit`); measured five-fold on 4,308 of the owner's rounds: the picked photograph placed first in 45.3% of held-out rounds before, 51.6% now; pairwise 80.4% → 82.2%; 3.4 s a fit on the rank lane; `taste.py` deleted | shipped |
 | E3 | A per-genre residual, so a night lake and a portrait stop sharing one scale | rejected by measurement: 16/32/64 k-means cluster offsets beside the direction move round accuracy 0.516 → 0.515–0.520 (noise); each photograph's own residual in the one-stage fit already absorbs its genre | rejected |
-| E4 | Learn's uncertainty was a count of rounds (1/√(1+n)), not what the rounds could still teach | `rank.uncertainty`: the fit's own (the Fisher information, Σ p(1−p) over a photograph's rounds plus the pull); Learn draws by it. Simulated (3 seeds, 2,000 photographs, rounds of 9): whole-order rho .331 → .346 and top-decile recall .458 → .463 at 600 rounds, rho .224 → .261 at 300 | shipped |
-| E5 | Burst-best is unmeasured | facets alone against the owner's picks within cadence stacks; the why on the tile from the largest term | open |
+| E4 | Learn's uncertainty was a count of rounds (1/√(1+n)), not what the rounds could still teach | the fit hands back its own uncertainty (`rank.fitted`: the Fisher information plus the pull) and the rank lane keeps it for Learn's draws, so a draw costs nothing more. Measured with the shipped mode, five seeds, 600 rounds of 9 over 2,000: top-decile recall .473 → .502 on every seed; the whole order unchanged (.342 → .340). The finding round still keys on wear, where the fit's uncertainty ties | shipped |
+| E5 | Burst-best within cadence stacks: facets alone against Sean's picks | the copy has no cadence stacks, so the next honest question was asked: within one shooting day, do the facets tell a pick from the rest? Measured on the six days holding picks (4,076 photographs, 158 picks, every loupe on disk): face sharpness AUC .48, subject ratio .49, eyes open .50 (every frame's eyes were open), frame texture .52, eye sharpness .50 — no signal. The facets stay facts in the inspector; no cull mark is earned yet | measured |
 
 ## Panoramas (2026-09-12, from docs/panorama-research.md)
 
 | # | Finding | Fix | Status |
 |---|---|---|---|
-| PN1 | A swept sequence is not recognised: every run of frames is a burst to the library | detect and preview: gates A (metadata) and B (overlap geometry on the 1,024 tiles, the Brown–Lowe verification, monotone direction, the i→i+2 test) over runs; a badge and a proposal, never an automatic group; a preview strip and an honest refusal | open |
+| PN1 | A swept sequence is not recognised: every run of frames is a burst to the library | `panorama.py`: the run around a frame (within 5 s, one camera, size, folder) judged on the 1,024 tiles by the overlap rule; the verdict kept once per run as a `sweep` cache row; S on a frame that keeps no beat stacks its sweep; the inspector says "4 frames sweep left to right, 49% overlap — S stacks them". A synthetic sweep is accepted and a burst refused in the suite; on his catalog 1 of 445 runs | shipped |
 | PN2 | No merge | full-resolution merge through the detailed stitching API reusing the detection's bundle adjustment: projection by field of view, blocks-gain before the seams, graph-cut seams, multi-band blend, auto-crop with the canvas kept; a 16-bit TIFF that becomes the stack's cover | open |
 | PN3 | A merge that is not a photograph | the raw path: linear demosaic, stitched in linear light, a linear DNG with the first frame's metadata and a sidecar naming the members; boundary-warp edge recovery as one slider | open |
 
@@ -760,4 +760,23 @@ finding was checked and the numbers said no.
 | # | Finding | Fix | Status |
 |---|---|---|---|
 | D1 | Thirteen lines could read "1 photographs" (the drag badge, the sidebar count, the import source and summary, a person's count, the search-kept notice, Empty Trash's notice, the selection heading); twenty more spelled their own plural | one word in the kit, `count(n, one, many)`, used by every surface that says how many | shipped |
+
+## Refutation of E4, BC13, FR3, FR7 (2026-09-12, by a second model)
+
+| # | Finding | Fix | Status |
+|---|---|---|---|
+| X115 | Learn's draw recomputed the uncertainty from the log on every click: +700 ms at 150k | the fit hands its uncertainty back with its scores; the rank lane keeps it; the draw reads it | shipped |
+| X116 | The E4 numbers came from a proxy strategy, not the shipped mode, and the simulator's draws were unseeded | measured with the shipped mode over five seeds; the simulator seeds the global generator; the row says what reproduced | shipped |
+| X117 | The uncertainty read the sort index's rounded scores, not the fit's | it is the fit's own, computed at the fitted scores | shipped |
+| X118 | The finding round sorted the band by the fit's uncertainty, which ties at the top | the band keys on wear again; the teaching window on the fit's uncertainty | shipped |
+| X119 | The batched cull read the last id outside the write lock: a concurrent decision aborted the whole verb | `decisions.decide_many`: the lock first (BEGIN IMMEDIATE), the same guards as `decide` | shipped |
+| X120 | A second, slower copy of the latest-per-subject query (7.4 s vs 3.2 s at 148k) | one window query narrowed to the selection, at rank 1 for the last word and rank 2 for the word before | shipped |
+| X121 | The projection held the write lock for the whole verb | through `projection.project`, in slices, as every projection is | shipped |
+| X122 | Restore still asked one query per subject | the word before the last, for everyone at once | shipped |
+| X123 | Undo answered in family order, not the order asked | in the order asked | shipped |
+| X124 | The inlined insert dropped `decide`'s guards (a blank subject went in) | `decide_many` keeps them | shipped |
+| X125 | A running import starved the stage's thumbnails and each ask held a thread | thumbnails on their own pair of workers; a closed library answers nothing | shipped |
+| X126 | The stage kept every detached cell after Cancel | the maps are cleared with the stage | shipped |
+| X127 | The FR7 comment overclaimed: a day's box is one write per photograph, not a few dozen | said plainly | shipped |
+| X128 | E1's headline disagreed with itself (51.6% vs 52.5%) | 51.6% everywhere | shipped |
 

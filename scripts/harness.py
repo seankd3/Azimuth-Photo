@@ -42,7 +42,7 @@ STUB = r"""<script>
     const count = day === dates[dates.length - 1] ? N - photos.length : Math.min(5, N - photos.length);
     days.push({ day, count });
     for (let i = 0; i < count; i += 1, id += 1) {
-      photos.push({ id, hash: `h${id}`, tail: `Raws/Digital/2026/${day}/p${id}.cr3`, tile: null, loupe: null, sharp: { subject: 1.5, eyes: 'open' },
+      photos.push({ id, hash: `h${id}`, tail: `Raws/Digital/2026/${day}/p${id}.cr3`, tile: null, loupe: null, sharp: { subject: 1.5, eyes: 'open' }, sweep: null,
         width: 6000, height: 4000, status: 'unflagged', rotate: 0, stack: 0, stars: 0,
         reachable: true, tile_failed: false, date_taken: `${day} 12:00:00`, camera_model: 'EOS R5' });
     }

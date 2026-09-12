@@ -64,11 +64,11 @@ frames of one stack, and the "why" on a tile is the largest term of
 
 ## The experiments, in order
 
-1. **E1** One-stage PL fit on the rounds vs the two-stage strength→ridge. **Done 09-12:** five-fold over 4,308 of Sean's rounds — round accuracy 0.453 → 0.525, pairwise 0.804 → 0.822 (λw = 1, λb = 1; λw = 0.1 the same within noise). Shipped as `rank.fit`; `taste.py` deleted.
+1. **E1** One-stage PL fit on the rounds vs the two-stage strength→ridge. **Done 09-12:** five-fold over 4,308 of Sean's rounds — round accuracy 0.453 → 0.516 as shipped (0.525 in the Adam experiment), pairwise 0.804 → 0.822 (λw = 1, λb = 1). Shipped as `rank.fit`; `taste.py` deleted.
 2. **E2** The eye and sharpness facets as a `sharpness` cache kind (faces first, newest first), then the facet block in the fit. An overnight lane; the largest gain on portrait rounds; reported per genre.
 3. **E3** The per-cluster residual. **Rejected 09-12:** 16/32/64 k-means offsets beside the direction: 0.516 → 0.515–0.520 round accuracy, noise; the one-stage fit's per-photograph residual already absorbs the genre.
-4. **E4** Bayesian-ridge variance as Learn's σ, and top-two finding rounds. **Shipped 09-12 (the σ half):** the fit's Fisher information replaces 1/√(1+n); simulated rho .331 → .346, top-decile .458 → .463 at 600 rounds. Not the literature's 2–3×: a modest, consistent gain. Top-two not measured.
-5. **E5** Burst-best within cadence stacks: facets alone against Sean's picks. Tells whether E2 earned its tile marks.
+4. **E4** Bayesian-ridge variance as Learn's σ, and top-two finding rounds. **Shipped 09-12 (the σ half):** the fit's Fisher information replaces 1/√(1+n) for the teaching window; measured with the shipped mode over five seeds, top-decile recall .473 → .502 on every seed, the whole order unchanged. Not the literature's 2–3×. Top-two not measured.
+5. **E5** Burst-best within cadence stacks: facets alone against Sean's picks. **Measured 09-12 (as the copy allows: no cadence stacks, so within-day):** on the six days holding picks, no facet tells a pick from the rest (AUC .48–.52; every frame's eyes were open). E2 has not earned a tile mark; the facets stay facts.
 6. **E6** Expression, then composition (SAMP-Net) only if E2 shows the eyes matter.
 
 Not done, and why: no new encoder (measured tie, nothing else fits); no MLP

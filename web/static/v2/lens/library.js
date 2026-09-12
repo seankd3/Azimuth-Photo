@@ -527,6 +527,10 @@ function renderInspector(panel, selected, actions = {}) {
     ['Lens', selected.lens || unknown],
     ['Sharpness', sharpnessSaid(selected.sharp), { said: true }],
     ['Eyes', { open: 'Open', closed: 'Closed', unsure: 'Cannot tell' }[selected.sharp?.eyes] || '', { said: true }],
+    ['Panorama', selected.sweep
+      ? `${numbered(selected.sweep.members.length, 'frame')} sweep ${selected.sweep.direction}, ${Math.round(selected.sweep.overlap * 100)}% overlap`
+        + (selected.stack_of || selected.stack ? '' : ' — S stacks them')
+      : '', { said: true }],
     ['Dimensions', selected.width && selected.height ? `${selected.width} × ${selected.height}` : ''],
     ['Size', selected.file_size ? `${(selected.file_size / 1e6).toFixed(1)} MB` : ''],
     ['Folder', folder || 'The drive\u2019s root', folder ? { folder } : { said: true }],

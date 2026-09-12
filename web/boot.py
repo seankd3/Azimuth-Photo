@@ -477,7 +477,7 @@ class Library:
         cadence run around it."""
 
         self._open()
-        return self.changed(stacks.stack(self.conn, photo_ids))
+        return self.changed(stacks.stack(self.conn, photo_ids, tiles=self.tiles))
 
     def unstack(self, photo_ids) -> dict:
         self._open()
@@ -1175,7 +1175,8 @@ class Library:
         self._open()
         scope = self.ranking(view)
         chosen = rank.candidates(self.conn, n, scope=all_of(scope, self.tiles.ready),
-                                 avoid=avoid, mode=mode, space=space)
+                                 avoid=avoid, mode=mode, space=space,
+                                 unsure=self._owner._unsure if self._owner is not None else None)
         rows = {row["id"]: row for row in self._with_urls(queries.photos(
             self.conn, scope=these([p["id"] for p in chosen]), sort="newest", limit=max(1, len(chosen)),
             offset=0, renditions=self.tiles.renditions, reachable_on=self._here(),
@@ -1308,6 +1309,11 @@ class Library:
         # facts the inspector says; the whole record stays for the fit.
         held = sharpness.of(self.conn, digest)
         answer["sharp"] = {"subject": held.get("subject"), "eyes": held.get("eyes")} if held else None
+        # A sweep this frame is part of: what S would stack, and the merge to
+        # come. Judged once per run and kept, so the ask is a read after that.
+        import panorama
+
+        answer["sweep"] = panorama.of(self.conn, self.tiles, int(photo_id))
         # Every name this photograph wears — palette tags, groups the space
         # formed, people — so the panel can answer "why is this here".
         import json as coding
@@ -1405,6 +1411,7 @@ class OwnedLibrary:
         self._ranking = False
         self._warming = False
         self._ranked = None            # (last round row, vector count) already written
+        self._unsure: dict[str, float] = {}   # the fit's own uncertainty, for Learn's draws
         self._space = None             # (vector count, subjects, matrix), append-only so count-keyed
         self._peopled = None           # (face rows, last person decision) already grouped
         self._labeled = None           # (vector count, last teaching) already written
@@ -1414,6 +1421,9 @@ class OwnedLibrary:
         # Bringing photographs in has its own lane: a card takes minutes, and
         # neither browsing nor the minute sweep may wait behind it.
         self._intake_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="intake")
+        # Staged thumbnails on their own pair of workers: bounded, and never
+        # behind an import running on the intake lane.
+        self._thumb_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="thumb")
         self._intake = {"phase": "idle"}
         self._intake_stop = threading.Event()
         self._staged: dict[str, list[dict]] = {}
@@ -1547,7 +1557,8 @@ class OwnedLibrary:
                 self._space = (key[1], *rank.space(conn))
             _count, subjects, vectors = self._space
             if self._ranked is None or key[:2] != self._ranked[:2]:
-                queries.rerank(conn, subjects, vectors)
+                scores, self._unsure = rank.fitted(rank.rounds(conn), subjects, vectors)
+                queries.rerank(conn, scores=scores)
                 self.shaped += 1
             self._ranked = key
             # Labels too: when a word was taught or the space grew, every
@@ -1805,19 +1816,21 @@ class OwnedLibrary:
         self._intake_stop.set()
 
     async def thumb(self, source: str, key: str) -> str | None:
-        """A small picture of one staged file, made on the intake lane -- a
-        raw's embedded preview, decoded off the bridge thread so the window's
-        other verbs never wait behind a card of thousands -- rendered into
-        the home's staging corner so the window can read it; None when the
-        file will not render."""
+        """A small picture of one staged file -- a raw's embedded preview --
+        made on the thumbnail pool (two workers, so a card's worth of asks is
+        bounded and never queues behind an import), rendered into the home's
+        staging corner so the window can read it; None when the file will
+        not render."""
 
         with self._state:
             if self._closed:
                 raise RuntimeError("library is closed")
-            future = self._intake_executor.submit(self._thumb, source, key)
+            future = self._thumb_executor.submit(self._thumb, source, key)
         return await asyncio.wrap_future(future)
 
     def _thumb(self, source: str, key: str) -> str | None:
+        if self._closed:
+            return None
         import hashlib
 
         import render
@@ -1909,6 +1922,7 @@ class OwnedLibrary:
                     # catalog is released only once it has stopped.
                     if self._follower is not None:
                         self._follower.join(timeout=15.0)
+                    self._thumb_executor.shutdown(wait=False, cancel_futures=True)
                     self._intake_executor.shutdown(wait=True, cancel_futures=False)
                     self._scan_executor.shutdown(wait=True, cancel_futures=False)
                     self._derive_executor.shutdown(wait=True, cancel_futures=False)

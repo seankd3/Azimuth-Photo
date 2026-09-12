@@ -564,7 +564,7 @@ def reindex(conn) -> dict[str, int]:
     }
 
 
-def rerank(conn, subjects=None, vectors=None) -> int:
+def rerank(conn, subjects=None, vectors=None, scores=None) -> int:
     """Recompute the ranking from the log and write it, and its stars, into
     the sort index.
 
@@ -584,7 +584,8 @@ def rerank(conn, subjects=None, vectors=None) -> int:
 
     import rank
 
-    scores = rank.ranking(conn, subjects, vectors)
+    if scores is None:
+        scores = rank.ranking(conn, subjects, vectors)
     # The shoot is the folder: a star can be earned in the world or there.
     rows = conn.execute(
         "SELECT id, content_hash AS hash, tail FROM images"

@@ -14,7 +14,6 @@ what counts), so it lives here rather than growing a second copy.
 from __future__ import annotations
 
 import json
-import time
 from typing import Callable, Iterable
 
 from model import decisions
@@ -47,71 +46,46 @@ def _photos(conn, image_ids: list[int], column: str) -> list[dict]:
     ]
 
 
-def _latest_all(conn, subjects: Iterable[str], family: str) -> dict[str, tuple[int, object]]:
-    """The latest decision per subject -- its id and value -- by the rule
-    `decisions.latest` reads by, in one read for the whole selection."""
+def _ranked(conn, subjects: Iterable[str], family: str, rank: int) -> dict[str, tuple[int, object]]:
+    """Each subject's word at `rank` (1 the latest, 2 the one before), as
+    (decision id, value): `decisions.LATEST_IN_FAMILY`'s window, narrowed
+    to the selection, so a whole-library verb is one read and the answer
+    comes out of SQLite one row per subject."""
 
     payload = json.dumps(sorted({str(s) for s in subjects}), separators=(",", ":"))
-    out: dict[str, tuple[int, object]] = {}
-    for row in conn.execute(
-        f"SELECT id, subject, value FROM decisions WHERE family = ?"
-        f" AND subject IN (SELECT value FROM json_each(?))"
-        f" ORDER BY {decisions.AUTHORITY_SQL} ASC, at ASC, id ASC",
-        (family, payload),
-    ):
-        out[str(row["subject"])] = (int(row["id"]), decisions.loaded(row))   # the last in this order wins
-    return out
-
-
-def _decide_all(conn, family: str, said: list[tuple[str, object]]) -> list[int]:
-    """One decision per subject, appended in one statement; their ids in
-    order. Select All then P on a whole library is one insert, not a
-    hundred and fifty thousand."""
-
-    if not said:
-        return []
-    first = int(conn.execute("SELECT COALESCE(MAX(id), 0) FROM decisions").fetchone()[0])
-    now = time.time()
-    conn.executemany(
-        "INSERT INTO decisions(subject, family, value, at, by) VALUES (?, ?, ?, ?, ?)",
-        [(str(subject), str(family), json.dumps(value), now, decisions.YOU) for subject, value in said],
-    )
-    ids = [int(row[0]) for row in conn.execute("SELECT id FROM decisions WHERE id > ? ORDER BY id", (first,))]
-    if len(ids) != len(said):
-        raise RuntimeError("the decisions written do not match the decisions made")
-    return ids
+    return {
+        str(row["subject"]): (int(row["id"]), decisions.loaded(row))
+        for row in conn.execute(
+            f"""
+            SELECT subject, id, value FROM (
+                SELECT subject, id, value,
+                       ROW_NUMBER() OVER (PARTITION BY subject
+                                          ORDER BY {decisions.AUTHORITY_SQL} DESC, at DESC, id DESC) AS place
+                FROM decisions
+                WHERE family = ? AND subject IN (SELECT value FROM json_each(?))
+            ) WHERE place = ?
+            """,
+            (family, payload, int(rank)),
+        )
+    }
 
 
 def _project_all(conn, column: str, said: list[tuple[str, object]]) -> dict[str, int]:
-    """The column written for every subject, one statement per distinct
-    value; how many rows each subject moved."""
+    """The column written for every subject through the one projection
+    (slices, so the write lock is never held for long); how many rows each
+    subject moved."""
 
-    by_value: dict[str, list[str]] = {}
-    for subject, value in said:
-        by_value.setdefault(json.dumps(value), []).append(str(subject))
-    for key, subjects in by_value.items():
-        conn.execute(
-            f"UPDATE images SET {column} = ? WHERE content_hash IN (SELECT value FROM json_each(?))",
-            (json.loads(key), json.dumps(subjects, separators=(",", ":"))),
-        )
+    from model import projection
+
+    if not said:
+        return {}
+    projection.project(conn, "content_hash", (column,), {subject: (value,) for subject, value in said}, only=True)
     return {
         str(row["hash"]): int(row["n"]) for row in conn.execute(
             "SELECT content_hash AS hash, COUNT(*) AS n FROM images"
             " WHERE content_hash IN (SELECT value FROM json_each(?)) GROUP BY content_hash",
             (json.dumps([str(subject) for subject, _ in said], separators=(",", ":")),))
     }
-
-
-def _previous_status(conn, subject: str) -> str:
-    rows = conn.execute(
-        f"SELECT value FROM decisions WHERE subject = ? AND family = ? "
-        f"ORDER BY {decisions.AUTHORITY_SQL} DESC, at DESC, id DESC LIMIT 2",
-        (subject, decisions.STATUS),
-    ).fetchall()
-    if len(rows) < 2:
-        return UNFLAGGED
-    value = decisions.loaded(rows[1])
-    return value if value in STATUSES and value != TRASHED else UNFLAGGED
 
 
 def change(
@@ -147,9 +121,9 @@ def change(
 
     try:
         # Every subject's last word in one read; the target decided in
-        # Python; then one insert and one write per distinct value. A loop
-        # of one decision per row was thirty seconds on a whole library.
-        latest_all = _latest_all(conn, by_hash, family)
+        # Python; then one insert and one projection. A loop of one
+        # decision per row was a minute on a whole library.
+        latest_all = _ranked(conn, by_hash, family, 1)
         todo: list[tuple[str, object, object]] = []
         for subject, row in by_hash.items():
             latest = latest_all.get(subject, (None, None))[1]
@@ -159,7 +133,7 @@ def change(
                 raise ValueError(f"invalid {family}: {after!r}")
             if before != after:
                 todo.append((subject, before, after))
-        ids = _decide_all(conn, family, [(subject, after) for subject, _, after in todo])
+        ids = decisions.decide_many(conn, family, [(subject, after) for subject, _, after in todo])
         counts = _project_all(conn, column, [(subject, after) for subject, _, after in todo])
         changes = [
             {"subject": subject, "family": family, "before": before, "after": after,
@@ -189,11 +163,18 @@ def reject(conn, image_ids: Iterable[int]) -> dict:
 def restore(conn, image_ids: Iterable[int]) -> dict:
     """Restore the status each identity had immediately before Reject."""
 
+    subjects = [str(row["hash"]) for row in _photos(conn, _ids(image_ids), "status") if row["id"] and row["hash"]]
+    # The word before the last, for everyone at once: a valid status that
+    # was not itself a reject, else unflagged.
+    before_last = {
+        subject: (value if value in STATUSES and value != TRASHED else UNFLAGGED)
+        for subject, (_id, value) in _ranked(conn, subjects, decisions.STATUS, 2).items()
+    }
     return change(
         conn,
         image_ids,
-        lambda inner, subject, before: (
-            _previous_status(inner, subject) if before == TRASHED else before
+        lambda _inner, subject, before: (
+            before_last.get(subject, UNFLAGGED) if before == TRASHED else before
         ),
     )
 
@@ -221,7 +202,7 @@ def undo(conn, changes: Iterable[dict]) -> dict:
             raise ValueError("one Undo may change each identity once")
         families = {family for _, family in subjects}
         latest_by_family = {
-            family: _latest_all(conn, [subject for subject, held in subjects if held == family], family)
+            family: _ranked(conn, [subject for subject, held in subjects if held == family], family, 1)
             for family in families
         }
         for change in requested:
@@ -237,18 +218,21 @@ def undo(conn, changes: Iterable[dict]) -> dict:
             if latest is None or latest[0] != decision_id or latest[1] != after:
                 raise ValueError(f"{family} changed after this action")
 
-        reversed_changes = []
+        # Written per family, answered in the order asked.
+        written: dict[tuple[str, str], int] = {}
         for family in families:
             column = decisions.PROJECTED[family][0]
             mine = [change for change in requested if str(change.get("family", decisions.STATUS)) == family]
             said = [(str(change["subject"]), change["before"]) for change in mine]
-            ids = _decide_all(conn, family, said)
+            for change, decision_id in zip(mine, decisions.decide_many(conn, family, said)):
+                written[(str(change["subject"]), family)] = decision_id
             _project_all(conn, column, said)
-            for change, decision_id in zip(mine, ids):
-                reversed_changes.append(
-                    {"subject": str(change["subject"]), "family": family,
-                     "before": change["after"], "after": change["before"], "decision": decision_id}
-                )
+        reversed_changes = [
+            {"subject": str(change["subject"]), "family": str(change.get("family", decisions.STATUS)),
+             "before": change["after"], "after": change["before"],
+             "decision": written[(str(change["subject"]), str(change.get("family", decisions.STATUS)))]}
+            for change in requested
+        ]
         conn.commit()
     except (KeyError, TypeError, ValueError):
         conn.rollback()

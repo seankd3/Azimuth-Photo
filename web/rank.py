@@ -187,7 +187,19 @@ STEPS = 300     # Adam steps; the fit is convex, this is past convergence
 
 
 def fit(log: list[tuple[str, list[str]]], subjects: list[str] | None = None, vectors=None) -> dict[str, float]:
-    """The whole ranking, from one fit on the rounds.
+    """The whole ranking, from one fit on the rounds: `fitted`'s scores."""
+
+    return fitted(log, subjects, vectors)[0]
+
+
+def fitted(log: list[tuple[str, list[str]]], subjects: list[str] | None = None,
+           vectors=None) -> tuple[dict[str, float], dict[str, float]]:
+    """The whole ranking, from one fit on the rounds -- and how unsure the
+    fit is of each judged photograph's own place: one over the square root
+    of its evidence, the Fisher information (`sum p(1 - p)` over its rounds,
+    at the fitted scores) plus the pull. A photograph whose rounds were all
+    foregone conclusions is as unsure as one never judged; one that keeps
+    landing in close calls is pinned. Learn draws by it.
 
     Every photograph's score is `x . w + b`: what its vector says a photograph
     like it is worth, and what its own rounds say beyond that. One
@@ -197,7 +209,7 @@ def fit(log: list[tuple[str, list[str]]], subjects: list[str] | None = None, vec
     together, so the direction is learned from the rounds themselves rather
     than from strengths fitted first. Measured (E1, five-fold over 4,308 of
     the owner's rounds): the two-stage head it replaces placed the picked
-    photograph first in 45.3% of held-out rounds, this one in 52.5%;
+    photograph first in 45.3% of held-out rounds, this one in 51.6%;
     pairwise 80.4% to 82.2%.
 
     Fitted, not folded. Elo folds the log in order and is path-dependent by
@@ -219,7 +231,7 @@ def fit(log: list[tuple[str, list[str]]], subjects: list[str] | None = None, vec
     """
 
     if not log:
-        return {}
+        return {}, {}
 
     import numpy as np
 
@@ -281,7 +293,13 @@ def fit(log: list[tuple[str, list[str]]], subjects: list[str] | None = None, vec
             vw = 0.999 * vw + 0.001 * gw * gw
             w -= rate * (mw / (1 - 0.9 ** t)) / (np.sqrt(vw / (1 - 0.999 ** t)) + 1e-8)
     scores = (x @ w if width else 0.0) + b
-    return {h: BASE + SPREAD * float(scores[i]) for h, i in index.items()}
+    final = scores[member]
+    top = np.maximum.reduceat(final, picked_at)
+    e = np.exp(final - top[belongs])
+    prob = e / np.bincount(belongs, weights=e)[belongs]
+    evidence = np.bincount(member, weights=prob * (1.0 - prob), minlength=n)
+    unsure = {h: float(1.0 / np.sqrt(evidence[i] + LAM_B)) for h, i in index.items() if appearances[i] > 0}
+    return {h: BASE + SPREAD * float(scores[i]) for h, i in index.items()}, unsure
 
 
 def ranking(conn, subjects: list[str] | None = None, vectors=None) -> dict[str, float]:
@@ -290,28 +308,6 @@ def ranking(conn, subjects: list[str] | None = None, vectors=None) -> dict[str, 
     return fit(rounds(conn), subjects, vectors)
 
 
-def uncertainty(log: list[tuple[str, list[str]]], scores: dict[str, float]) -> dict[str, float]:
-    """How unsure the fit is of each judged photograph's own place: one over
-    the square root of its evidence, where the evidence is what its rounds
-    could still teach (the Fisher information, `sum p(1 - p)` over every
-    round it was in, plus the pull). A photograph whose rounds were all
-    foregone conclusions is as unsure as one never judged; one that keeps
-    landing in close calls is pinned. On the fit's own scale, before
-    `SPREAD`."""
-
-    import math
-
-    evidence: dict[str, float] = {}
-    for picked, over in log:
-        members = [picked, *over]
-        values = [(scores.get(h, BASE) - BASE) / SPREAD for h in members]
-        top = max(values)
-        weights = [math.exp(v - top) for v in values]
-        total = sum(weights)
-        for h, w in zip(members, weights):
-            p = w / total
-            evidence[h] = evidence.get(h, 0.0) + p * (1.0 - p)
-    return {h: 1.0 / math.sqrt(e + LAM_B) for h, e in evidence.items()}
 
 
 # A star is the ranking's readable face, and it is earned: only a photograph
@@ -440,7 +436,7 @@ def seen(conn) -> dict[str, int]:
     return counts
 
 
-def candidates(conn, n: int = 12, *, scope: Scope = EVERYTHING, avoid=(),
+def candidates(conn, n: int = 12, *, scope: Scope = EVERYTHING, avoid=(), unsure: dict[str, float] | None = None,
                mode: str = "close", space=None) -> list[dict]:
     """Photographs worth comparing next.
 
@@ -525,19 +521,10 @@ def candidates(conn, n: int = 12, *, scope: Scope = EVERYTHING, avoid=(),
         photo["rating"] = float(photo["elo"] or BASE)
 
     n = max(2, int(n))
-    unsure = None
-    if str(mode) == "learn":
-        # The fit's own uncertainty over everyone the rounds touched, from
-        # the sort index's scores: what each photograph's rounds could still
-        # teach, not a count of them.
-        import json
-
-        log = rounds(conn)
-        touched = sorted({h for picked, over in log for h in (picked, *over)})
-        scores = {row["hash"]: float(row["elo"]) for row in conn.execute(
-            "SELECT content_hash AS hash, elo FROM images WHERE content_hash IN (SELECT value FROM json_each(?))",
-            (json.dumps(touched),))}
-        unsure = uncertainty(log, scores)
+    if str(mode) == "learn" and unsure is None:
+        # The rank lane hands its fit's own uncertainty in; without a lane
+        # (a test, a script) the fit over the rounds alone says it.
+        unsure = fitted(rounds(conn))[1]
     ordered = _ordered(pool, n, str(mode), space, unsure)
     if ordered:
         # A set wears its anchor's orientation when the scope can dress it:
@@ -596,7 +583,7 @@ def _ordered(pool: list[dict], n: int, mode: str, space, unsure: dict[str, float
         # Not enough judged to have leaders yet: fall through to close.
 
     if mode == "learn":
-        return _learn(pool, n, unsure or {})
+        return _learn(pool, n, unsure)
 
     if mode == "diverse":
         return _spread(pool, n, space)
@@ -622,10 +609,12 @@ def _learn(pool: list[dict], n: int, unsure: dict[str, float]) -> list[dict]:
       model — a round teaches most when its outcome is least foretold —
       and before anything is judged the flat-rating crowd is one huge
       uncertain window, so coverage falls out free. The uncertainty is the
-      fit's own (`uncertainty`: what a photograph's rounds could still
-      teach), not a count of its rounds; measured (E4, the same
-      simulation) it moves the whole order from rho .331 to .346 and
-      top-decile recall from .458 to .463 at 600 rounds, .224 to .261 at 300.
+      fit's own (`fitted`: what a photograph's rounds could still teach),
+      not a count of its rounds. Measured with this very mode, five seeds,
+      600 rounds of 9 over 2,000 (E4): top-decile recall .473 to .502 on
+      every seed; the whole order unchanged (.342 to .340). The finding
+      round still keys on wear -- at the top every round is a foregone
+      conclusion and the fit's uncertainty ties.
     * **Finding** — the least-worn of the current top band (15%), spread
       across it, because pure uncertainty stops visiting the leaders once
       their ratings separate, and the stars read the top. Half the rounds,
@@ -638,8 +627,9 @@ def _learn(pool: list[dict], n: int, unsure: dict[str, float]) -> list[dict]:
     happened to come first in rating order was the lowest-predicted -- the
     bottom of the library, dealt round after round.
 
-    Measured (scripts/sim_learn.py, 3 seeds, 600 rounds of 9 over 2,000):
-    this mixture dominates every other mode on both answers at once —
+    Measured when the mixture was chosen (scripts/sim_learn.py, an earlier
+    build of the simulation, 3 seeds, 600 rounds of 9 over 2,000): this
+    mixture dominated every other mode on both answers at once —
     whole-order rho .382 and top-decile recall .457, against close's
     .371/.397, random's .365/.418 and diverse's .363/.455. Pure teaching
     reaches rho .406 but finds only .348 of the true top; the third round
@@ -666,7 +656,8 @@ def _learn(pool: list[dict], n: int, unsure: dict[str, float]) -> list[dict]:
         band = np.flatnonzero(mu >= cut)
         if len(band) < n:
             band = np.argsort(-mu)[: max(n * 2, 16)]
-        order = band[np.lexsort((mu[band], -sigma[band]))]     # least-worn first
+        worn = np.asarray([p["comparisons"] for p in pool])
+        order = band[np.lexsort((mu[band], worn[band]))]        # least-worn first
         fresh = order[: max(3 * n, 12)]
         fresh = fresh[np.argsort(mu[fresh], kind="stable")]
         if len(fresh) > n:

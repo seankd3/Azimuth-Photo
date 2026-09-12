@@ -216,8 +216,8 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     syncChecks();
   }
 
-  // Only the cells whose state moved are touched: a day's box on a card
-  // of thousands is a few dozen writes, not a walk of the whole stage.
+  // Only the cells whose state moved are touched: one write per changed
+  // cell, found by key, never a query over the whole stage.
   function wear(worn, now, put) {
     for (const key of worn) if (!now.has(key)) put(key, false);
     for (const key of now) if (!worn.has(key)) put(key, true);
@@ -400,6 +400,10 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     leave();
     if (state.running) return;
     stage.replaceChildren();
+    cells.clear();
+    dayBoxes.clear();
+    wornChecked = new Set();
+    wornSelected = new Set();
     state.candidates = [];
     state.checked = new Set();
     selected = new Set();

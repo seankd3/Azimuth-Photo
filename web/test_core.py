@@ -1773,6 +1773,19 @@ class RankingIsDerived(CoreCase):
         self.assertTrue(np.isfinite(out["stranger"]))
         self.assertGreater(out["stranger"], out["nobody"])
 
+    def test_the_fit_is_least_sure_where_every_round_was_foregone(self):
+        # Ten rounds a photograph won against nobodies teach nothing more
+        # about it; one close call pins it. The fit says so, and Learn draws
+        # by that rather than by counting rounds.
+        for at in range(10):
+            self._round("sure", [f"nobody{at}"], 1.0 + at)
+        for at in range(10):
+            self._round("close", ["rival"], 20.0 + at)
+            self._round("rival", ["close"], 40.0 + at)
+        _scores, unsure = rank.fitted(rank.rounds(self.conn))
+        self.assertGreater(unsure["sure"], unsure["close"])
+        self.assertNotIn("stranger", unsure)
+
     def test_with_no_vectors_it_is_the_fit_not_a_failure(self):
         # Ranking works at zero embedding coverage and sharpens as they land.
         self._round("a", ["b"], 1.0)
@@ -2692,6 +2705,34 @@ class SharpnessIsRelative(CoreCase):
         edge = sharpness.measure(self._picture("edge.jpg", blur=False), [[-0.05, -0.05, 0.3, 0.3]])
         self.assertIsNotNone(edge["subject"])
         self.assertLessEqual(edge["faces"][0]["px"], 128)
+
+    def test_a_sweep_is_frames_that_overlap_one_way_and_a_burst_is_not(self):
+        # One wide scene cut into three frames that each overlap the next by
+        # two fifths, left to right, is a sweep; three of the same frame is
+        # a burst, which overlaps everywhere and is refused.
+        import numpy as np
+        from PIL import Image
+
+        import panorama
+
+        rng = np.random.default_rng(5)
+        scene = rng.integers(40, 220, (480, 1800, 3), dtype=np.uint8)
+        for _ in range(200):     # structure for the features to hold on to
+            x, y = rng.integers(0, 1700), rng.integers(0, 400)
+            scene[y:y + rng.integers(8, 60), x:x + rng.integers(8, 60)] = rng.integers(0, 255, 3)
+        width, stride = 640, 380
+        frames = []
+        for i in range(3):
+            path = os.path.join(self.tmp, f"sweep-{i}.jpg")
+            Image.fromarray(scene[:, i * stride:i * stride + width]).save(path, "JPEG", quality=92)
+            frames.append({"id": i + 1, "path": path})
+        sweep = panorama.judge(frames, lambda f: f["path"])
+        self.assertIsNotNone(sweep)
+        self.assertEqual(sweep["members"], [1, 2, 3])
+        self.assertEqual(sweep["direction"], "left to right")
+        self.assertTrue(0.3 <= sweep["overlap"] <= 0.5, sweep)
+        burst = [{"id": 9, "path": frames[0]["path"]}] * 3
+        self.assertIsNone(panorama.judge(burst, lambda f: f["path"]))
 
     def test_eyes_are_said_from_both_and_never_from_a_small_one(self):
         import sharpness
