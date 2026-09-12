@@ -11,9 +11,13 @@ permissions:
 
 jobs:
   check:
-    # The product is a Windows desktop app; the check runs where it ships.
-    name: azimuth-check
-    runs-on: windows-latest
+    # The product ships on Windows; cloud sessions work on Linux. One check, both.
+    name: azimuth-check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -25,5 +29,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: python -m venv web/.venv
-      - run: web/.venv/Scripts/python.exe -m pip install -r web/requirements-v2.txt -r web/requirements-dev.txt
+      - if: runner.os == 'Windows'
+        run: web/.venv/Scripts/python.exe -m pip install -r web/requirements-v2.txt -r web/requirements-dev.txt
+      - if: runner.os != 'Windows'
+        run: web/.venv/bin/python -m pip install -r web/requirements-v2.txt -r web/requirements-dev.txt
       - run: bash scripts/azimuth-check
