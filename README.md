@@ -2,7 +2,7 @@
 
 **Your archive, on your hardware — with Lightroom Classic instincts.**
 
-[![CI](https://github.com/Sean-Kenneth-Doherty/azimuth-photo/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Sean-Kenneth-Doherty/azimuth-photo/actions/workflows/ci.yml)
+[![CI](https://github.com/seankd3/azimuth-photo/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/seankd3/azimuth-photo/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-2.0.0--dev-f2b03d)](docs/CORE.md)
 
@@ -244,7 +244,7 @@ v1 and are not in 2.0 today:
   work against the V2 vocabulary once the desktop is finished.
 
 If you need those today, the last full v1 build is commit
-[`d8aa7b8f`](https://github.com/Sean-Kenneth-Doherty/azimuth-photo/commit/d8aa7b8f),
+[`d8aa7b8f`](https://github.com/seankd3/azimuth-photo/commit/d8aa7b8f),
 immediately before the first deletion wave. Saying this out loud is cheaper than
 letting you discover it after an import.
 
@@ -253,7 +253,7 @@ letting you discover it after an import.
 Windows, Python 3.12, Node 22:
 
 ```powershell
-git clone https://github.com/Sean-Kenneth-Doherty/azimuth-photo.git
+git clone https://github.com/seankd3/azimuth-photo.git
 cd azimuth-photo
 python -m venv web\.venv
 web\.venv\Scripts\python.exe -m pip install -r web\requirements-v2.txt
