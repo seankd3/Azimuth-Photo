@@ -285,7 +285,8 @@ def debt(conn, kinds: Iterable[cache.Kind], *, attached: dict[int, str] | None =
     return tally
 
 
-def _identify_one(conn, row, attached: dict[int, str] | None = None) -> bool:
+def _identify_one(conn, row, attached: dict[int, str] | None = None,
+                  kinds: tuple[cache.Kind, ...] = ()) -> bool:
     path = photos.locate(conn, row["tail"], expected_size=row["file_size"], roots=attached)
     if path is None:
         return False
@@ -294,6 +295,17 @@ def _identify_one(conn, row, attached: dict[int, str] | None = None) -> bool:
         "UPDATE images SET content_hash = ? WHERE id = ? AND content_hash IS NULL",
         (digest, int(row["id"])),
     )
+    # An answer belongs to the identity too, and this row may have arrived
+    # after one was made -- the second copy of a photograph whose first copy
+    # is already dated and measured. A ready answer projects to this row now;
+    # nothing is owed, so nothing else would ever have written it.
+    for kind in kinds:
+        if kind.project is None:
+            continue
+        for recipe in kind.ahead():
+            entry = cache.get(conn, digest, kind, recipe)
+            if entry is not None and entry.get("state") == cache.READY:
+                cache.project(conn, digest, int(row["id"]), kind, entry, recipe)
     # A decision belongs to the identity, and this row may have arrived after
     # one was made -- a second copy of a picked or turned photograph. Its
     # columns take the log's current answers now, so the row is never the one
@@ -403,7 +415,7 @@ def _most_owed(conn, kinds: tuple[cache.Kind, ...], scope: Scope,
     misses: dict[str, int] = {}
     for _age_key, what, kind, recipe, row in heads:
         if what == "identity":
-            if _identify_one(conn, row, attached):
+            if _identify_one(conn, row, attached, kinds):
                 conn.commit()
                 return {"did": "identity", "photo": row["id"]}
             continue

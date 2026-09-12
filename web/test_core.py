@@ -205,6 +205,26 @@ class FreshCatalogTests(unittest.TestCase):
         self.assertEqual((answer["width"], answer["height"]), (600, 900))
         self.assertEqual(answer["date_taken"], "2026-08-17 03:34:08")
 
+    def test_a_late_twin_takes_the_answer_its_identity_already_has(self):
+        # Found by the fixture's duplicate pair: the metadata answer projects
+        # to every row of its hash when it is made, and a second copy
+        # identified after that owed nothing, so it stayed undated and
+        # unmeasured until the next launch's reindex.
+        with tempfile.TemporaryDirectory() as directory:
+            photo_root = os.path.join(directory, "Photos")
+            os.makedirs(photo_root)
+            exif = Image.Exif()
+            exif[0x9003] = "2026:08:17 03:34:08"
+            Image.new("RGB", (900, 600), "olive").save(os.path.join(photo_root, "a.jpg"), "JPEG", exif=exif)
+            shutil.copyfile(os.path.join(photo_root, "a.jpg"), os.path.join(photo_root, "b.jpg"))
+            with boot.Library(os.path.join(directory, "catalog.db"), os.path.join(directory, "tiles")) as product:
+                drive = product.attach(photo_root)
+                product.refresh(drive["uuid"])
+                while work.step(product.conn, (embedded_metadata.KIND,), yield_to=lambda: False):
+                    pass
+                dated = {row["tail"]: row["date_taken"] for row in product.browse()}
+        self.assertEqual(dated, {"a.jpg": "2026-08-17 03:34:08", "b.jpg": "2026-08-17 03:34:08"})
+
     def test_embedded_metadata_is_cached_projected_and_overridden_by_your_date(self):
         with tempfile.TemporaryDirectory() as directory:
             catalog = os.path.join(directory, "catalog.db")
