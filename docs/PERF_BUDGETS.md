@@ -12,7 +12,7 @@ row). Measure first; then the budget is the measurement, held.
 | Durable ranking-action append | p95 ≤ 50 ms, p99 < 100 ms | proposed |
 | Dual click → both photos replaced | p95 ≤ 50 ms, p99 < 100 ms | proposed |
 | Export start → acknowledgement | ≤ 50 ms | proposed |
-| Launch → first usable library | measure cold/warm, local/NAS first | proposed |
+| Launch → window shown → first page answered | ≤ 2 s / ≤ 3 s warm on the working disk (measured 1.74 s / 2.47 s through the launcher on a loaded machine, 2026-09-12; every launch writes its own marks to `logs/azimuth.log`) | held |
 | Grid first content and sustained scroll | measure first; no omitted photos | proposed |
 | Loupe open and next/previous | measure cached/uncached, RAW/raster first | proposed |
 | Develop adjustment → preview update | measure first; input never dropped | proposed |

@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import sys
 import threading
+import time
 from typing import Awaitable, Callable, TypeVar
 
 import webview
@@ -16,6 +17,17 @@ import home
 
 
 Result = TypeVar("Result")
+
+# Launch, as the clock the startup marks are read against: the log says
+# when the window showed and when the first page answered, in seconds
+# from here, so every real launch measures itself.
+_LAUNCHED = time.perf_counter()
+
+
+def mark(what: str) -> None:
+    import logging
+
+    logging.getLogger("azimuth").info("%s at +%.2fs", what, time.perf_counter() - _LAUNCHED)
 
 
 def bundled_document() -> Path:
@@ -52,6 +64,7 @@ def wear_the_mark(window) -> None:
         return
 
     def dress():
+        mark("window shown")
         try:
             import ctypes
 
@@ -142,6 +155,7 @@ class Desktop:
         self._window = None
         self._exported_to: str | None = None
         self._close_lock = threading.Lock()
+        self._first_page_said = False
         self._closed = False
         if home_path:
             self._settle(home_path)
@@ -199,10 +213,14 @@ class Desktop:
 
     def photos(self, sort: str = "newest", limit: int = 200, offset: int = 0,
                view: dict | None = None) -> list[dict]:
-        return self._run(
+        page = self._run(
             lambda library: library.browse(
                 scope=library.viewing(view), sort=sort, limit=int(limit), offset=int(offset))
         )
+        if not self._first_page_said:
+            self._first_page_said = True
+            mark("first page answered")
+        return page
 
     def size(self, view: dict | None = None) -> int:
         return self._run(lambda library: library.size(library.viewing(view)))
