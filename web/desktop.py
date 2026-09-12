@@ -70,6 +70,62 @@ def wear_the_mark(window) -> None:
     window.events.shown += dress
 
 
+_MUTEX = None
+
+
+def one_at_a_time() -> bool:
+    """One Azimuth on the machine: a second launch brings the first to the
+    front and leaves. Two on one catalog would each rewrite the other's
+    answers, and a double-clicked shortcut is the usual way to get two."""
+
+    if not sys.platform.startswith("win"):
+        return True
+    import ctypes
+
+    global _MUTEX
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.CreateMutexW(None, False, r"Local\AzimuthPhoto.Desktop")
+    if kernel32.GetLastError() == 183:   # ERROR_ALREADY_EXISTS
+        user32 = ctypes.windll.user32
+        hwnd = user32.FindWindowW(None, "Azimuth Photo")
+        if hwnd:
+            user32.ShowWindow(hwnd, 9)   # SW_RESTORE
+            user32.SetForegroundWindow(hwnd)
+        return False
+    _MUTEX = handle   # held for the life of the process
+    return True
+
+
+def keep_a_log(where: str | None) -> None:
+    """What went wrong, written down: the last few megabytes of the log
+    under the home (`logs/azimuth.log`), and every uncaught error on any
+    thread, so a window that closed by itself never has to be guessed at."""
+
+    import logging
+    import logging.handlers
+    import tempfile
+
+    folder = os.path.join(where or tempfile.gettempdir(), "logs")
+    try:
+        os.makedirs(folder, exist_ok=True)
+        handler = logging.handlers.RotatingFileHandler(
+            os.path.join(folder, "azimuth.log"), maxBytes=2_000_000, backupCount=2, encoding="utf-8")
+    except OSError:
+        return
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    root = logging.getLogger()
+    root.addHandler(handler)
+    if root.level > logging.INFO or root.level == logging.NOTSET:
+        root.setLevel(logging.INFO)
+
+    def uncaught(kind, value, trace):
+        logging.getLogger("azimuth").critical("uncaught", exc_info=(kind, value, trace))
+
+    sys.excepthook = uncaught
+    threading.excepthook = lambda args: uncaught(args.exc_type, args.exc_value, args.exc_traceback)
+    logging.getLogger("azimuth").info("Azimuth Photo opened from %s", sys.executable)
+
+
 class Desktop:
     """The complete JavaScript-facing product vocabulary.
 
@@ -453,6 +509,9 @@ class Desktop:
 
 
 def main() -> int:
+    if not one_at_a_time():
+        return 0
+    keep_a_log(home.current())
     desktop = Desktop(home.current())
     # The document is opened from its file rather than handed over as a
     # string: a page with a file origin may show a tile straight from the

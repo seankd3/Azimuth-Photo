@@ -700,6 +700,8 @@ finding was checked and the numbers said no.
 | PK2 | Task Manager and the taskbar said python | `scripts/make_launcher.py`: a copy of the base pythonw.exe beside the venv's pyvenv.cfg (the venv's own pythonw is a redirector that starts the base interpreter as a child, which is why it said python), wearing the compass and a version resource; runs the checkout in-process as "Azimuth Photo"; the Desktop and Start Menu shortcuts point at it | shipped |
 | IM1 | The import dialog offers no Copy or Move | Copy / Move as the dialog's own choice, remembered; Move takes each file only after its copy is verified, and the line under it says so | shipped |
 | IM2 | A photograph culled before comes back on every re-import | the decision log already holds the cull by identity (Empty Trash keeps the log), so nothing new is written down: a culled identity that no drive holds stays out, the import says how many, and one button brings them anyway; a test culls, empties, re-imports | shipped |
+| PF1 | A double-clicked shortcut opened a second Azimuth on the same catalog | one at a time: a second launch brings the first window to the front and leaves | shipped |
+| PF2 | A window that closed by itself left nothing to read | `logs/azimuth.log` under the home (rotating, 2 MB × 3) and every uncaught error on any thread written to it | shipped |
 
 ## Taste and sharpness program (2026-09-10, from docs/taste-and-culling-research.md)
 
