@@ -16,9 +16,10 @@ darkroom — all on your own machine, with nothing uploaded anywhere.
 > mosaic and the fused search engine, running in your browser on real catalog data.
 >
 > **📖 Why it looks like this — [the Field Log](https://azimuthphoto.com/log/)**
-> The honest build history, with interactive demos: the
-> film engine's halation, the GL↔NumPy twin, and the month we deleted 42% of
-> the codebase.
+> The honest build history in three acts, with interactive demos: the film
+> engine's halation, the month we deleted 42% of the codebase, and
+> [Act III](https://azimuthphoto.com/log/#act3) — the product rebuilt on the
+> core, V1 leaving the tree, and 509 findings closed with a receipt.
 
 ![Library grid](docs/assets/screens/library-grid.jpg)
 
@@ -43,7 +44,7 @@ So the machine's opinions were deleted, and the app got faster:
 | Grid page | 180 ms | **0.22 ms** | 86 indexes on one table became 5 |
 | Semantic search | 19,538 ms | **50 ms** | vectors keyed on content hashes |
 | Status counts | 188 ms | **8.3 ms** | computed, not stored |
-| The codebase | 182,688 lines | **31,033** | five tables, seven functions |
+| The codebase | 182,688 lines | **25,367** | five tables · 21 surface files · V1 deleted 8 Sep |
 
 Not because anything was written tersely — the core is heavily commented — but
 because most of what was there had **stopped being asked**. Five separate
@@ -52,7 +53,16 @@ reason to exist once a path was stored as *a drive plus a tail*.
 
 The whole design is one document: **[docs/CORE.md](docs/CORE.md)** — four facts,
 five tables, seven functions. The reasoning, with the mistakes left in, is
-[Act II of the Field Log](https://azimuthphoto.com/log/#act2).
+[Act II of the Field Log](https://azimuthphoto.com/log/#act2); what was built
+on it, and how it is kept honest, is [Act III](https://azimuthphoto.com/log/#act3).
+
+Since 8 September the V1 application is gone from the tree. What runs is
+16,286 lines of Python — the five tables, the pure photo and pixel modules,
+and twenty-one surface files, one each — and a 7,835-line
+UI of plain modules bundled into the one document the window opens. Polish
+runs as a ledger: [docs/FINDINGS.md](docs/FINDINGS.md) holds every finding an
+audit made, and a row closes only in the commit that does the work — 532 rows
+since 9 September, 509 shipped, each with its number or its screenshot.
 
 ---
 
@@ -63,11 +73,14 @@ five tables, seven functions. The reasoning, with the mistakes left in, is
 You cannot honestly star-rate ten thousand photos. But you can always answer
 *this one, or that one?*
 
-**Refine** shows a mosaic — pick the best one. The winner is replaced by a fresh
-contender; the rest stay and keep competing. Behind it is an Elo system with
-uncertainty tracking and propagation through visually similar photos, so one
-pick moves the frames that look like it. A quality meter tells you how *sorted*
-any scope actually is.
+**Rank** deals a round — pick the best one. A round is drawn whole, every set at
+equal area so nothing wins for being bigger, and *Best* is simply the order
+those rounds produce. A comparison is a decision in the log; the ranking is
+derived from the log plus the embedding space, so one pick moves the frames
+that look like it. **Stars are the ranking's face:** each additional star
+halves the set, earned in the world or in the shoot, and the inspector says
+which. *Learn* finds the top of a scope; *Diverse* spans it; **N** judges a
+marked burst as a round of its own.
 
 Rank an entire archive, one two-second decision at a time. It's the oldest idea
 in the project — the 2023 version was 228 lines of Tkinter — and the only one
@@ -91,9 +104,34 @@ element for element, the LRTimelapse discipline.
   spectral layer exposure, halation, H&D characteristic curves, DIR couplers,
   per-layer grain. Fourteen stocks, four of them tuned against **fifty real lab
   scans**. [Play with the halation model →](https://azimuthphoto.com/log/#ch-darkroom)
-- **Honest about the gap.** The full Lightroom-shaped workspace (presets,
-  curves, colour grading wheels, HDR) is the next phase, and the tone parity gap
-  to Adobe's render is measured, not assumed.
+- **Honest about the gap.** The tone phase measured **0.0445 ΔL against a
+  0.035 bar** and Develop is parked on that number until it can be built
+  without a bandaid — the spec is the owner's own seven Lightroom screenshots.
+  The crop ships; an edited photograph's loupe is a preview and says so.
+
+## Organizing: predicted, then earned
+
+Photographs wear facts; you correct the facts and they learn; albums keep what
+you gather. Every machine-made fact is a prediction and wears the tilde
+(`Nightscapes ~74`); every answer of yours is an append-only decision that
+turns it into an earned fact.
+
+- **Labels are born by teaching.** Search *cat*, hit ✗ on the one dog, and the
+  word is a label that is smarter everywhere it appears. The Labels list is
+  exactly the words you have taught.
+- **A smart album is a saved query.** Labels and smart albums share one
+  formula — `(derived ∪ pinned-in) ∖ said-no` — and one chip language with
+  the filters.
+- **A person is a name you give a group of faces.** Faces are made on your own
+  card; the wall is a stage to meet everyone; a name that joins two groups
+  says so, and a Yes can be taken back by replaying the log.
+- **Time gets two surfaces:** day chapters in the grid, session cards in the
+  search drop. The phone's GPX track places every frame in its
+  span — the camera knows when, the phone knows where.
+- **Sharpness is facts, never a verdict.** A frame carries its sharpness map,
+  a subject-to-frame ratio, and per face and per eye a Zhu–Milanfar measure
+  with eyes open / closed / can't tell from the face landmarks. Nothing
+  blends them.
 
 ## The library
 
@@ -102,9 +140,11 @@ per-folder counts and instant scoping. Filter by camera, lens, file type, flag,
 rating floor or date — every facet composes. A timeline scrubber rides the right
 edge on date-sorted views, and zero-result scopes tell you *why* and offer the fix.
 
-**Stacks** group what belongs together, LR-Classic style — burst sequences,
-export variants of one edit, and cross-source duplicates (that re-uploaded copy
-of your original) collapse behind a single cover with a count badge.
+**A stack is a decision.** Nothing is stacked unasked: **S** on marked frames
+makes one, **S** on a lone frame stacks the cadence run around it — a burst is
+a run of frames at one rhythm, and it keeps its beat through a change of focus
+or exposure — **Shift+S** unstacks, all with Undo. Stacks open by default with
+a band; a badge folds one; the bar collapses all.
 
 **Trash is safe by design.** Deleting moves files to a `.trash` area on the same
 drive — fully restorable, byte-identical, ratings and history intact. Nothing is
@@ -189,7 +229,9 @@ v1 and are not in 2.0 today:
 - **Hub / satellite sync**: the laptop and its drive are the system now. A
   share is a drive; a helper is another machine doing owed work.
 - **VLM captions**: the derivation fleet was removed. People, faces and a
-  learned label vocabulary are back, on the laptop's own CPU and card.
+  learned label vocabulary are here, on the laptop's own CPU and card.
+- **The full darkroom**: the crop and the metadata round-trip ship; the slider
+  workspace is parked behind a measured parity gap (above).
 - **The phone**: the old Android client is deleted; a phone returns as new
   work against the V2 vocabulary once the desktop is finished.
 
