@@ -814,6 +814,9 @@ finding was checked and the numbers said no.
 | X169 | Develop on a merged frame painted the edit and every render snapped the loupe back to the merge; the face key mapped the frame's box onto the merge | the stand-in yields when the edit panel is open and when a face is asked for | shipped |
 | X170 | The merge held every frame of a run at 4,096 px at once, thirty-six frames being over a gigabyte before the stitcher's own copies | runs past eight frames merge from the 1,024 px tiles | shipped |
 | X171 | The merge's real error was overwritten by "The frames could not be merged" | the bridge's own reason stands when there is one | shipped |
+| X172 | The grouped projection made the rerank's own projection two to three times slower: twenty-four thousand distinct (elo, stars) over a few rows each became a statement per group (25 s to 59 s over 150k) | the hybrid: groups of sixteen rows or more land in chunks of five hundred, the rest keep the one bound statement (executemany) in the rows' own read order (out of order the same rows were three times slower again). Measured on the 150k copy, a rerank shape of 44,455 distinct values: the old loop 9.6 s, the hybrid 10.3 s (the first run of either is cold, 21 s); a cull shape of 12,879 subjects 0.48 s | shipped |
+| X173 | The face key on a merged frame swapped the picture and placed the zoom from the merge's dimensions (the old image's naturalWidth survives a src change until the new one loads), and skipped the first face | the frame's pixels are awaited (`decode()`) before the zoom is placed | shipped |
+| X174 | `cache.evict` protects only the never-evict kinds it is handed; a caller with a partial tuple would have a never-evict kind's rows and files taken (the worker hands every kind, so unreachable today; the X166 test uses a partial tuple by fixture) | held: the worker is the one caller and is handed every kind | held |
 
 ## Refutation of D1-D5, PF4, PF5, E2-3 (2026-09-12, by a second model)
 

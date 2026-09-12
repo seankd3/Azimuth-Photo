@@ -1485,8 +1485,13 @@ let facing = { id: null, at: -1 };
 async function focusFace(photo) {
   const boxes = await product.faces(photo.id).catch(() => []);
   if (!boxes.length) { notify('No face has been read on this photograph.'); return; }
-  // A face is on the frame, not on the merge the loupe may be standing in.
-  if (merged) { merged = null; renderLoupe(photo); }
+  // A face is on the frame, not on the merge the loupe may be standing
+  // in: the frame first, and its pixels before the zoom is placed.
+  if (merged) {
+    merged = null;
+    renderLoupe(photo);
+    await loupeImage.decode().catch(() => {});
+  }
   facing = { id: photo.id, at: facing.id === photo.id ? (facing.at + 1) % boxes.length : 0 };
   const [x, y, w, h] = boxes[facing.at];
   // A breath above the box's centre: the eyes.

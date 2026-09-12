@@ -50,20 +50,29 @@ def project(conn, key: str, columns: Iterable[str], intended: dict, *,
         )
     else:
         reads = (conn.execute(f"SELECT {key}, {listed} FROM images WHERE {key} IS NOT NULL"),)
+    in_order: list[tuple] = []   # (key, wanted) as read: the rows' own order on disk
     for read in reads:
         for row in read:
             wanted = intended.get(row[0])
             if wanted is not None and tuple(row)[1:] != tuple(wanted):
                 differing.setdefault(tuple(wanted), []).append(row[0])
-    # One statement per five hundred rows that want the same values, not
-    # one per row: a cull verb writes one word onto thousands of rows, and
-    # the per-row form spent its time re-entering the engine (9,319 rows:
-    # 2.83 s per row, 0.30 s in chunks; 150,000: 20 s to 5.3 s). A rerank
-    # writes many distinct values and lands as it did, one row at a time.
+                in_order.append((row[0], tuple(wanted)))
+    # Rows that want the same values land in one statement per five
+    # hundred, not one per row: a cull verb writes one word onto thousands
+    # of rows, and the per-row form spent its time re-entering the engine
+    # (9,319 rows: 2.83 s per row, 0.30 s in chunks; 150,000: 20 s to
+    # 5.3 s). A rerank writes tens of thousands of distinct values over a
+    # few rows each; those keep the one bound statement (executemany) in
+    # the rows' own order -- a statement per small group was three times
+    # slower, and the same rows updated out of order were three times
+    # slower again.
     assignments = ", ".join(f"{column} = ?" for column in columns)
     written = 0
     since_commit = 0
+    singles = [(*wanted, k) for k, wanted in in_order if len(differing[wanted]) < 16]
     for wanted, keys in differing.items():
+        if len(keys) < 16:
+            continue
         for start in range(0, len(keys), 500):
             chunk = keys[start:start + 500]
             cursor = conn.execute(
@@ -73,6 +82,11 @@ def project(conn, key: str, columns: Iterable[str], intended: dict, *,
             if not only and since_commit >= slice_rows:
                 conn.commit()
                 since_commit = 0
+    for start in range(0, len(singles), slice_rows):
+        cursor = conn.executemany(f"UPDATE images SET {assignments} WHERE {key} = ?", singles[start:start + slice_rows])
+        written += cursor.rowcount
+        if not only:
+            conn.commit()
     if not only:
         conn.commit()
     return written
