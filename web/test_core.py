@@ -187,6 +187,24 @@ class FreshCatalogTests(unittest.TestCase):
         self.assertEqual(again[0]["tile"], page_after[0]["tile"])
         self.assertTrue(body.startswith(b"\xff\xd8"))
 
+    def test_reading_a_display_file_opens_it_once(self):
+        # Staging a card reads every file's header, and on a card each open
+        # is a seek: the shape and the tags must come from the same one.
+        from photo import tags
+        with tempfile.TemporaryDirectory() as directory:
+            source = os.path.join(directory, "frame.jpg")
+            exif = Image.Exif()
+            exif[0x0112] = 6
+            exif[0x9003] = "2026:08:17 03:34:08"
+            Image.new("RGB", (900, 600), "maroon").save(source, "JPEG", exif=exif)
+            opened = []
+            real_open = Image.open
+            with patch.object(Image, "open", side_effect=lambda *a, **k: opened.append(a[0]) or real_open(*a, **k)):
+                answer = tags.read(source)
+        self.assertEqual(opened, [source])
+        self.assertEqual((answer["width"], answer["height"]), (600, 900))
+        self.assertEqual(answer["date_taken"], "2026-08-17 03:34:08")
+
     def test_embedded_metadata_is_cached_projected_and_overridden_by_your_date(self):
         with tempfile.TemporaryDirectory() as directory:
             catalog = os.path.join(directory, "catalog.db")

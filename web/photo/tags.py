@@ -40,17 +40,30 @@ def dimensions(path: str) -> tuple[int, int]:
             width, height = int(raw.sizes.width), int(raw.sizes.height)
             return (height, width) if raw.sizes.flip in (5, 6) else (width, height)
     with Image.open(path) as image:
-        width, height = int(image.width), int(image.height)
-        orientation = int(image.getexif().get(0x0112, 1) or 1)
-        return (height, width) if orientation in (5, 6, 7, 8) else (width, height)
+        return _shown(image)
+
+
+def _shown(image) -> tuple[int, int]:
+    width, height = int(image.width), int(image.height)
+    orientation = int(image.getexif().get(0x0112, 1) or 1)
+    return (height, width) if orientation in (5, 6, 7, 8) else (width, height)
 
 
 def read(path: str, *, description: bool = False) -> dict:
     """Read the six embedded fields the library indexes (and, when asked, the
-    free-text description a lab or a scanning tool may have written)."""
+    free-text description a lab or a scanning tool may have written).
 
-    width, height = dimensions(path)
-    tags = _raw_tags(path) if kind.is_raw(path) else _display_tags(path)
+    One open per file. Staging a card reads every file's header, and on a
+    card each open is a seek; the shape and the tags come from the same one.
+    """
+
+    if kind.is_raw(path):
+        width, height = dimensions(path)
+        tags = _raw_tags(path)
+    else:
+        with Image.open(path) as image:
+            width, height = _shown(image)
+            tags = _display_tags(image)
     make = _text(tags.get("make"))
     model = _text(tags.get("model"))
     if make and model.casefold().startswith(make.casefold()):
@@ -121,15 +134,14 @@ def _raw_tags(path: str) -> dict:
         return {}
 
 
-def _display_tags(path: str) -> dict:
+def _display_tags(image) -> dict:
     try:
-        with Image.open(path) as image:
-            embedded = image.getexif()
-            values = dict(embedded.items())
-            try:
-                values.update(embedded.get_ifd(ExifTags.IFD.Exif))
-            except (AttributeError, KeyError, TypeError, ValueError):
-                pass
+        embedded = image.getexif()
+        values = dict(embedded.items())
+        try:
+            values.update(embedded.get_ifd(ExifTags.IFD.Exif))
+        except (AttributeError, KeyError, TypeError, ValueError):
+            pass
     except (OSError, SyntaxError, TypeError, ValueError):
         return {}
     try:
