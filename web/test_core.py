@@ -420,6 +420,23 @@ class BringingPhotographsIn(CoreCase):
         again = intake.bring(self.conn, self.hot["uuid"], intake.RAWS, intake.scan(self.conn, card))
         self.assertEqual(again["total"], 0)
 
+    def test_a_photograph_culled_before_stays_out_unless_asked_for(self):
+        # The decision log remembers a cull by identity, so nothing else has
+        # to: a re-inserted card leaves out what was thrown away, says how
+        # many, and brings them only when asked.
+        gone = self.jpeg(seed="g")
+        card = self.card({"IMG_0007.JPG": gone})
+        first = intake.bring(self.conn, self.hot["uuid"], intake.RAWS, intake.scan(self.conn, card))
+        self.assertEqual(first["brought"], 1)
+        image = self.conn.execute("SELECT id, content_hash FROM images").fetchone()
+        cull.reject(self.conn, [image["id"]])
+        trash.empty(self.conn, expected_count=1)
+        self.assertIsNone(self.conn.execute("SELECT 1 FROM images").fetchone())
+        again = intake.bring(self.conn, self.hot["uuid"], intake.RAWS, intake.scan(self.conn, card))
+        self.assertEqual((again["brought"], again["culled"], again["culled_keys"]), (0, 1, ["DCIM/100CANON/IMG_0007.JPG"]))
+        asked = intake.bring(self.conn, self.hot["uuid"], intake.RAWS, intake.scan(self.conn, card), include_culled=True)
+        self.assertEqual((asked["brought"], asked["culled"]), (1, 0))
+
     def test_bring_stops_between_files_and_resumes_by_running_again(self):
         card = self.card({f"IMG_{n:04d}.JPG": self.jpeg(seed=chr(97 + n)) for n in range(4)})
         staged = intake.scan(self.conn, card)

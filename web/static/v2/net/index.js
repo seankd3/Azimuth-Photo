@@ -79,7 +79,7 @@ export const library = Object.freeze({
   exportPhotos: (ids, quality = 92, longEdge = 0, rename = '') => invoke('export_photos', ids, quality, longEdge, rename),
   cards: () => invoke('cards'),
   stage: (source) => invoke('stage', source),
-  bring: (source, keys, kind, clearSource = false, roll = '', rolls = {}) => invoke('bring', source, keys, kind, clearSource, roll, rolls),
+  bring: (source, keys, kind, clearSource = false, roll = '', rolls = {}, includeCulled = false) => invoke('bring', source, keys, kind, clearSource, roll, rolls, includeCulled),
   intakeStatus: () => invoke('intake_status'),
   stopIntake: () => invoke('stop_intake'),
   thumb: (source, key) => invoke('thumb', source, key),

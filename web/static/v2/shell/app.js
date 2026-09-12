@@ -2312,6 +2312,7 @@ const TIPS = {
   'adopt-track': 'Add a GPS track (GPX)\u2026', 'export-folder': 'Save metadata for Lightroom', 'rescan-drive': 'Re-scan this drive now',
   'rename-album': 'Rename the album\u2026', 'freeze-album': 'Freeze into a plain album', 'delete-album': 'Delete the album',
   'rename-label': 'Rename the word\u2026', 'forget-label': 'Forget the word', 'name-ok': 'Save the name',
+  'bring-culled': 'Bring the photographs culled before',
 };
 const KEY_OF = new Map();
 for (const [, keys] of SHORTCUTS) for (const [key, , actions] of keys) for (const action of actions || []) if (!KEY_OF.has(action)) KEY_OF.set(action, key);

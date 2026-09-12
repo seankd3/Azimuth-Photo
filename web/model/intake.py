@@ -30,7 +30,7 @@ import re
 import stat
 from collections.abc import Callable, Iterable
 
-from model import photos
+from model import decisions, photos
 
 RAWS = "raws"
 FILM = "film"
@@ -213,6 +213,7 @@ def bring(
     rolls_by_group: dict[str, str] | None = None,
     clear_source: bool = False,
     skip_known: bool = True,
+    include_culled: bool = False,
     progress: Callable[[dict], None] | None = None,
     stop: Callable[[], bool] = lambda: False,
 ) -> dict:
@@ -222,10 +223,17 @@ def bring(
     `progress` is called after every file with the running tally; `stop` is
     asked before every file and ends the run cleanly between files, never
     leaving a source removed whose copy was not verified.
+
+    A photograph culled before -- its identity carries a trashed status in
+    the decision log, and no drive holds it now -- stays out unless
+    `include_culled`: the log already remembers the cull, so a re-inserted
+    card does not bring back what was thrown away, and nothing else is
+    written down to make that so. The keys left out come back in the tally
+    for the one click that brings them anyway.
     """
 
     tally = {"hashes": [], "brought": 0, "already": 0, "skipped": 0, "cleared": 0, "failed": 0,
-             "bytes": 0, "done": 0, "total": 0, "stopped": False, "outcomes": []}
+             "culled": 0, "culled_keys": [], "bytes": 0, "done": 0, "total": 0, "stopped": False, "outcomes": []}
     wanted = list(candidates)
     tally["total"] = len(wanted)
 
@@ -261,6 +269,11 @@ def bring(
             if clear_source:
                 _clear(source, tally)
             note("already in the library", candidate)
+            continue
+        if not held and not include_culled and decisions.latest(conn, identity, decisions.STATUS) == "trashed":
+            tally["culled"] += 1
+            tally["culled_keys"].append(candidate["key"])
+            note("culled before", candidate)
             continue
 
         name = candidate["name"]

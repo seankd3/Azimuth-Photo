@@ -181,7 +181,12 @@
         <p class="eyebrow">Days</p>
         <p class="destinations" data-destinations></p>
         <p class="import-into" data-import-into></p>
-        <label class="check-row" data-clear-row hidden><input type="checkbox" data-clear> Clear the card as each file is verified</label>
+        <p class="eyebrow">Bring them by</p>
+        <div class="kind-choice" data-mode-choice>
+          <button type="button" data-mode="copy">Copy</button>
+          <button type="button" data-mode="move">Move</button>
+        </div>
+        <p class="import-into" data-mode-said></p>
         <p class="eyebrow">Choose</p>
         <div class="import-choose">
           <button class="quiet-button" type="button" data-action="check-new">New only</button>
@@ -191,6 +196,7 @@
         <p class="import-summary" data-import-summary></p>
         <p class="import-progress" data-import-progress hidden></p>
         <div class="import-actions">
+          <button class="quiet-button" type="button" data-action="bring-culled" hidden></button>
           <button class="quiet-button" type="button" data-action="stop-import" hidden>Stop</button>
           <button class="primary-button" type="button" data-action="start-import">Import</button>
         </div>

@@ -1727,7 +1727,7 @@ class OwnedLibrary:
         }
 
     async def bring(self, source: str, keys: list[str], kind: str, *, clear_source: bool = False,
-                    roll: str = "", rolls: dict[str, str] | None = None) -> dict:
+                    roll: str = "", rolls: dict[str, str] | None = None, include_culled: bool = False) -> dict:
         """Start bringing the chosen staged photographs in, on the intake lane."""
 
         source = os.path.abspath(source)
@@ -1751,12 +1751,12 @@ class OwnedLibrary:
             self._intake_stop.clear()
             self._intake = {"phase": "bringing", "source": source, "kind": kind, "done": 0,
                             "total": len(chosen), "brought": 0, "already": 0, "skipped": 0,
-                            "cleared": 0, "failed": 0, "bytes": 0, "started": time.time()}
+                            "cleared": 0, "failed": 0, "culled": 0, "bytes": 0, "started": time.time()}
             self._intake_executor.submit(self._bring, source, chosen, kind, receiving["uuid"],
-                                         bool(clear_source), str(roll or ""), dict(rolls or {}))
+                                         bool(clear_source), str(roll or ""), dict(rolls or {}), bool(include_culled))
         return dict(self._intake)
 
-    def _bring(self, source, chosen, kind, drive_uuid, clear_source, roll, rolls) -> None:
+    def _bring(self, source, chosen, kind, drive_uuid, clear_source, roll, rolls, include_culled=False) -> None:
         conn = model.connect(self._library.catalog_path)
 
         def progress(tally: dict) -> None:
@@ -1767,7 +1767,8 @@ class OwnedLibrary:
 
         try:
             tally = intake.bring(conn, drive_uuid, kind, chosen, roll=roll, rolls_by_group=rolls,
-                                 clear_source=clear_source, progress=progress, stop=self._intake_stop.is_set)
+                                 clear_source=clear_source, include_culled=include_culled,
+                                 progress=progress, stop=self._intake_stop.is_set)
             # What just came in is the pinned Previous import, rolled whole:
             # the last import's members leave, this one's arrive.
             if tally.get("hashes"):
@@ -1779,10 +1780,11 @@ class OwnedLibrary:
                 sets.add(conn, Library.LAST_IMPORT, tally["hashes"])
                 conn.commit()
             self._intake.update({k: tally[k] for k in
-                                 ("done", "total", "brought", "already", "skipped", "cleared", "failed", "bytes")})
+                                 ("done", "total", "brought", "already", "skipped", "cleared", "failed", "culled", "bytes")})
+            self._intake["culled_keys"] = list(tally["culled_keys"])
             self._intake["phase"] = "stopped" if tally["stopped"] else "done"
             self._intake["failures"] = [o for o in tally["outcomes"] if o["outcome"] not in
-                                        ("written", "already there", "already in the library")][:50]
+                                        ("written", "already there", "already in the library", "culled before")][:50]
         except Exception as error:  # noqa: BLE001 - the status carries it
             self._intake["phase"] = "failed"
             self._intake["error"] = str(error)

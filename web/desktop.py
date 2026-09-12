@@ -360,12 +360,13 @@ class Desktop:
         return self._wait(self._product.stage(str(source)))
 
     def bring(self, source: str, keys: list[str], kind: str, clear_source: bool = False,
-              roll: str = "", rolls: dict | None = None) -> dict:
+              roll: str = "", rolls: dict | None = None, include_culled: bool = False) -> dict:
         if self._product is None:
             raise RuntimeError("Choose where Azimuth should live first.")
         return self._wait(self._product.bring(str(source), list(keys), str(kind),
                                               clear_source=bool(clear_source), roll=str(roll or ""),
-                                              rolls={str(k): str(v) for k, v in (rolls or {}).items()}))
+                                              rolls={str(k): str(v) for k, v in (rolls or {}).items()},
+                                              include_culled=bool(include_culled)))
 
     def intake_status(self) -> dict:
         return self._product.intake_status() if self._product else {"phase": "idle"}

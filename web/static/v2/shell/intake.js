@@ -20,12 +20,14 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
   const destinations = document.querySelector('[data-destinations]');
   const summary = document.querySelector('[data-import-summary]');
   const progress = document.querySelector('[data-import-progress]');
-  const clearRow = document.querySelector('[data-clear-row]');
-  const clearBox = document.querySelector('[data-clear]');
+  const modeChoice = document.querySelector('[data-mode-choice]');
+  const modeSaid = document.querySelector('[data-mode-said]');
+  const culledButton = document.querySelector('[data-action="bring-culled"]');
   const startButton = document.querySelector('[data-action="start-import"]');
   const stopButton = document.querySelector('[data-action="stop-import"]');
   const backButton = document.querySelector('[data-action="close-import"]');
-  const state = { source: '', kind: null, roots: {}, candidates: [], checked: new Set(), isCard: false, running: false, rolls: {} };
+  const state = { source: '', kind: null, roots: {}, candidates: [], checked: new Set(), isCard: false, running: false, rolls: {}, mode: 'copy', culled: [] };
+  const moving = () => state.mode === 'move';
   // The grid's own selection grammar, in the stage: click, Ctrl adds,
   // Shift ranges, and a checkbox ticked on a selection answers for all of
   // it — Lightroom's import hands, Azimuth's one grammar.
@@ -92,10 +94,11 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     title.textContent = isCard ? 'Import from card' : 'Import folder';
     sourceLine.textContent = `${staged.source} — ${staged.candidates.length.toLocaleString()} photographs` +
       (staged.receiving ? `, into ${staged.receiving}` : '');
-    clearRow.hidden = !isCard;
+    state.mode = recall('azimuth.import-mode', 'copy') === 'move' ? 'move' : 'copy';
+    state.culled = [];
+    culledButton.hidden = true;
     // Erasing the card is never the default: it is chosen once, then
     // remembered as the person's own answer.
-    clearBox.checked = isCard && recall('azimuth.clear-card', false) === true;
     progress.hidden = true;
     progress.textContent = '';
     stopButton.hidden = true;
@@ -229,6 +232,14 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
       button.classList.toggle('is-active', button.dataset.kind === state.kind);
     }
     document.querySelector('[data-kind-choice]').classList.toggle('is-asking', !state.kind);
+    // Copy leaves the originals; Move takes each one only after its copy
+    // is verified, so a stopped or failed import never loses a file.
+    for (const button of modeChoice.querySelectorAll('[data-mode]')) {
+      button.classList.toggle('is-active', button.dataset.mode === state.mode);
+    }
+    modeSaid.textContent = moving()
+      ? `Each file leaves the ${state.isCard ? 'card' : 'source'} once its copy is verified.`
+      : 'The originals stay where they are.';
 
     // One list, two jobs: each day says where it will land *and* wears the
     // checkbox that imports it — Lightroom's date picking without a scroll
@@ -261,15 +272,22 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
   }
 
   async function start() {
-    if (!state.kind || state.running) return;
+    return launch([...state.checked], false);
+  }
+
+  // The import of these keys; `culled` brings back what was culled
+  // before, which the first run leaves out.
+  async function launch(keys, culled) {
+    if (!state.kind || state.running || !keys.length) return;
     state.running = true;
     startButton.hidden = true;
+    culledButton.hidden = true;
     stopButton.hidden = false;
     progress.hidden = false;
     progress.textContent = 'Starting…';
     try {
       const rolls = Object.fromEntries(Object.entries(state.rolls).map(([group]) => [group, rollName(group)]));
-      await product.bring(state.source, [...state.checked], state.kind, state.isCard && clearBox.checked, '', rolls);
+      await product.bring(state.source, keys, state.kind, moving(), '', rolls, culled);
     } catch (error) {
       // The panel's own line carries its own refusal, right beside the
       // button that asked.
@@ -300,7 +318,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     const eta = rate ? Math.round(left / rate) : null;
     const gb = ((status.bytes || 0) / 1e9).toFixed(2);
     if (status.phase === 'bringing') {
-      const said = state.isCard && clearBox.checked && eta !== null
+      const said = state.isCard && moving() && eta !== null
         ? `${done.toLocaleString()} of ${total.toLocaleString()} · ${gb} GB · card free in ~${formatSeconds(eta)}`
         : `${done.toLocaleString()} of ${total.toLocaleString()} · ${gb} GB` + (eta !== null ? ` · ~${formatSeconds(eta)} left` : '');
       progress.textContent = said;
@@ -319,7 +337,14 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     if (status.already) parts.push(`${status.already.toLocaleString()} already at their place`);
     if (status.skipped) parts.push(`${status.skipped.toLocaleString()} already in the library`);
     if (status.failed) parts.push(`${status.failed.toLocaleString()} could not be imported`);
-    const cleared = state.isCard && clearBox.checked && (status.cleared || 0) >= total && status.phase === 'done';
+    // Culled before: the log remembers a cull by the photograph's identity,
+    // so a re-inserted card does not bring back what was thrown away. One
+    // click brings them anyway.
+    if (status.culled) parts.push(`${status.culled.toLocaleString()} culled before stayed out`);
+    state.culled = status.culled_keys || [];
+    culledButton.hidden = !state.culled.length;
+    culledButton.textContent = `Bring the ${state.culled.length.toLocaleString()} culled before`;
+    const cleared = state.isCard && moving() && (status.cleared || 0) >= total && status.phase === 'done';
     const said = (status.removed ? 'The card was removed. ' : status.phase === 'stopped' ? 'Stopped. ' : status.phase === 'failed' ? `${status.error} ` : '')
       + parts.join(', ') + (cleared ? ' — card empty, safe to eject.' : '.');
     progress.textContent = said;
@@ -408,7 +433,14 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     state.rolls[group].name = event.target.value;
     render();
   });
-  clearBox.addEventListener('change', () => remember('azimuth.clear-card', clearBox.checked));
+  modeChoice.addEventListener('click', (event) => {
+    const mode = event.target.closest('[data-mode]')?.dataset.mode;
+    if (!mode) return;
+    state.mode = mode;
+    remember('azimuth.import-mode', mode);
+    render();
+  });
+  culledButton.addEventListener('click', () => void launch(state.culled, true));
   document.querySelector('[data-kind-choice]').addEventListener('click', (event) => {
     const kind = event.target.closest('[data-kind]')?.dataset.kind;
     if (!kind) return;
