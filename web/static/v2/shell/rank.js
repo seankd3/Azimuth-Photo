@@ -50,7 +50,9 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
 
   function remember(photos) {
     for (const photo of photos) state.recent.push(photo.hash);
-    const cap = Math.min(RECENT, Math.max(0, state.total - state.size * 2));
+    // The window never fences off what a set and two sets in hand need:
+    // past it the well ran dry in a small scope and the set shrank.
+    const cap = Math.min(RECENT, Math.max(0, state.total - state.size * 3));
     if (state.recent.length > cap) state.recent.splice(0, state.recent.length - cap);
   }
 
@@ -76,9 +78,12 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
     // keeps the decoded bitmap for an element that stays referenced.
     const image = new Image();
     image.decoding = 'async';
-    image.src = sourceFor(photo);
+    const source = sourceFor(photo);
+    image.src = source;
     photo.warm = image;
-    return image.decode().catch(() => {});
+    photo.warmFor = source;
+    photo.ready = false;
+    return image.decode().then(() => { photo.ready = true; }).catch(() => {});
   }
 
   function sourceFor(photo) {
@@ -93,13 +98,16 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
   }
 
   async function fill() {
-    // Keep one set's worth in hand, asked for in the background after every
-    // change and never twice at once.
-    if (state.filling || state.buffer.length >= state.size || !isOpen()) return;
+    // Keep two sets' worth in hand, asked for in the background after every
+    // change and never twice at once. A pair pick takes both cards, so one
+    // set in hand was one pick of headroom and the next pick waited on the
+    // bridge (the owner, 09-12: "the rank game still lags esp on 2 image mode").
+    const want = state.size * 2;
+    if (state.filling || state.buffer.length >= want || !isOpen()) return;
     const generation = state.generation;
     state.filling = (async () => {
       try {
-        const answer = await ask(state.size);
+        const answer = await ask(want - state.buffer.length);
         if (generation !== state.generation) return;
         accept(answer);
         const onStage = new Set(state.set.map((p) => p.hash));
@@ -313,9 +321,11 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
     // Nothing left to bring in: the set shrinks rather than repeating.
     const gone = arrivals.filter(([, next]) => !next).map(([slot]) => slot).sort((a, b) => b - a);
     for (const slot of gone) { state.set.splice(slot, 1); state.age.splice(slot, 1); }
-    // A keyboard pick keeps its seat; a mouse pick leaves no cursor on the
-    // stranger that just arrived there.
-    state.selected = byMouse ? -1 : Math.min(index, state.set.length - 1);
+    // No cursor survives a pick: the card that arrives in the picked slot is
+    // a stranger, and an accent on it read as a verdict already given. The
+    // keyboard stays on the stage, so the numbers and Enter still work and
+    // an arrow brings the cursor back.
+    state.selected = -1;
     render();
     void fill();
     state.busy = false;
@@ -654,10 +664,23 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
       card.dataset.index = index;
       card.dataset.turn = photo.rotate || 0;
       card.setAttribute('aria-label', `Pick ${photo.tail.split('/').pop()}`);
-      const image = photo.warm && photo.warm.src === sourceFor(photo) ? photo.warm : document.createElement('img');
+      // Paint what is decoded now: the warmed bitmap when it is ready, else
+      // the grid tile, with the wide loupe swapped in the moment its decode
+      // lands. Nothing a pick shows waits on a 4,096 px decode.
+      const want = sourceFor(photo);
+      const warmed = photo.warm && photo.warmFor === want && photo.ready;
+      const image = warmed ? photo.warm : document.createElement('img');
       image.alt = '';
       image.decoding = 'async';
-      if (!image.src) image.src = sourceFor(photo);
+      if (!warmed) {
+        const first = photo.tile || want;
+        image.src = first;
+        if (want !== first) {
+          (photo.warm && photo.warmFor === want ? photo.warm.decode() : preload(photo))
+            .then(() => { if (image.isConnected) image.src = want; })
+            .catch(() => {});
+        }
+      }
       const number = document.createElement('kbd');
       number.textContent = index + 1 === 10 ? '0' : index + 1 === 11 ? '-' : index + 1 === 12 ? '=' : String(index + 1);
       card.append(image, number);
