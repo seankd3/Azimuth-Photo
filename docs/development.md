@@ -86,9 +86,10 @@ does:
   is needed or reachable.
 - `./scripts/azimuth-check`, the same check as on Windows; with no desktop it
   builds the document instead of opening it. CI runs it on both platforms.
-- No window. A UI change is proven in the harness (`scripts/harness.py`) and
-  by the built document; the native look and the Windows rebuild wait for the
-  owner's next sitting, and the pull request says so.
+- No window. A UI change is proven in the harness: `scripts/harness_proof.mjs`
+  opens the harness page in headless Chromium, runs the journeys and captures
+  a screenshot for the pull request. The native look and the Windows rebuild
+  wait for the owner's next sitting, and the pull request says so.
 - Its own branch, never `main`: the cloud-session exception in
   [`AGENTS.md`](../AGENTS.md).
 
@@ -128,6 +129,10 @@ touch the screen:
   `--size 1366x768` opens it at the 13-inch persona; every journey is run
   there too before a round lands.
 - `test_desktop.py` crosses the real bridge with no window at all.
+- `scripts/harness_proof.mjs <out.png> --probe a.js` is `native_proof.py` for
+  a machine with no desktop: the harness page in headless Chromium, the same
+  probes and `PROBE` lines, a capture at the end. Playwright's Chromium: the
+  one a cloud container ships, else `npx playwright install chromium` once.
 - `scripts/journeys/*.js` are the probes for what a photographer actually
   does (cull, loupe, survey, search, album, people), each run through
   `native_proof.py` to a screenshot; the gallery is read side by side with the

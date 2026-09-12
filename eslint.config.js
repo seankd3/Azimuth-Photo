@@ -22,7 +22,7 @@ export default [
     },
   },
   {
-    files: ["web/*.mjs"],
+    files: ["web/*.mjs", "scripts/*.mjs"],
     languageOptions: {
       ecmaVersion: 2024,
       sourceType: "module",
