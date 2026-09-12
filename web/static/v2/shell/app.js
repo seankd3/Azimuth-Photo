@@ -678,7 +678,7 @@ function visibleGrid() {
         : inAlbum
           ? (shelf.smart
             ? 'No photographs match its filters yet — they join as they qualify.'
-            : 'Drag photos onto its name, or right-click any photo anywhere in the library.')
+            : 'Drag photographs onto its name, or right-click any photograph anywhere in the library.')
           : searching
             ? 'Try fewer words, or a different idea — meaning works too, not just names.'
             : inFolder
@@ -1059,7 +1059,7 @@ const forgetItem = folderMenu.querySelector('[data-action="forget-missing"]');
 function disarmForget() {
   delete forgetItem.dataset.armed;
   forgetItem.classList.remove('is-armed');
-  forgetItem.textContent = 'Forget missing photos…';
+  forgetItem.textContent = 'Forget missing photographs…';
 }
 async function forgetMissing(folder) {
   const where = folder || '*';
@@ -1793,7 +1793,7 @@ function renderChrome(state) {
   const restorable = state.view === 'trash' && (state.marked?.size || state.selected);
   const restore = document.querySelector('[data-action="restore"]');
   restore.hidden = !restorable;
-  restore.textContent = state.marked?.size > 1 ? `Restore ${state.marked.size}` : 'Restore';
+  restore.textContent = state.marked?.size > 1 ? `Restore ${state.marked.size.toLocaleString()}` : 'Restore';
   document.querySelector('[data-action="empty-trash"]').hidden = state.view !== 'trash' || !state.counts.trash;
   document.querySelector('.nav-row[data-action="all-photos"]').classList.toggle('is-active', state.view === 'library' && !(state.folders || []).length);
   document.querySelector('.nav-row[data-action="trash-view"]').classList.toggle('is-active', state.view === 'trash');
@@ -1809,7 +1809,7 @@ function renderChrome(state) {
     : searching
       ? (state.query
         ? `Results for “${state.query}”${where ? ` in ${where}` : ''}`
-        : `More like ${(state.like || []).length === 1 ? 'this photo' : `${(state.like || []).length} photos`}`)
+        : `More like ${(state.like || []).length === 1 ? 'this photograph' : numbered((state.like || []).length, 'photograph')}`)
       : (ranking ? 'Rank · ' : '') + (where || 'All photographs');
   document.querySelector('[data-action="add-chip"]').hidden = state.view !== 'library' || ranking;
   // Export acts on the selection; without one there is nothing to offer.
