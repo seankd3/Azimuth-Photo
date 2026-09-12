@@ -26,10 +26,12 @@ overlay, stop and reconcile the discrepancy before coding.
   rewrite may live on a named branch until its deliberate review and merge; do
   not create additional branches or move production to it implicitly.
 - Cloud-session exception: an agent working in a cloud session (Claude Code
-  on the web, started from the phone or a browser) may push a `task/*` branch
-  (or the `claude/*` branch the cloud names for it) and open a pull request
-  for review. It never commits to `main` directly; merging is the owner's
-  act. The branch lives as long as its pull request.
+  on the web or Codex, started from the phone or a browser) may push a
+  `task/*` branch, or the branch its cloud names for it (`claude/*`,
+  `codex/*`), and open a pull request for review. It never commits to `main`
+  directly; merging is the owner's act. The branch lives as long as its pull
+  request. This file is the contract for every agent, whichever model runs
+  it.
 - Runtime data never belongs inside a source checkout.
 - Do not add personal usernames, home directories, private addresses, mount
   points, catalog paths, or secrets to tracked defaults or documentation.

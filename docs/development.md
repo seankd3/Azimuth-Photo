@@ -69,10 +69,13 @@ imports that break them.
 
 ## Cloud sessions
 
-Development continues from the phone. A task submitted at claude.ai/code (or
-in the Claude app) runs in a fresh Linux container that clones the repository,
-and what comes back is a branch and a draft pull request to read, comment on
-and merge from the phone. What a cloud session has and does:
+Development continues from the phone. A task submitted to Claude Code on the
+web (claude.ai/code, or the Claude app) or to Codex (the ChatGPT app) runs in
+a fresh Linux container that clones the repository, and what comes back is a
+branch and a draft pull request to read, comment on and merge from the phone.
+Both read [`AGENTS.md`](../AGENTS.md) and run the same check, so a change is
+held to one standard whichever agent made it. What a cloud session has and
+does:
 
 - The setup above, on Linux, with `python3.12` named outright (the
   container's default `python3` may be older). Nothing of the owner's archive
