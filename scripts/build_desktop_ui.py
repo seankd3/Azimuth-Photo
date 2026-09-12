@@ -51,6 +51,15 @@ def render(template: str, css: str, javascript: str) -> str:
     return document
 
 
+def esbuild() -> list[str]:
+    """npm leaves a JavaScript shim at this path on Windows and swaps in the
+    native binary elsewhere; the shim is run by node, the binary by itself."""
+
+    with open(ESBUILD, "rb") as handle:
+        shim = handle.read(2) == b"#!"
+    return ["node", str(ESBUILD)] if shim else [str(ESBUILD)]
+
+
 def main() -> int:
     if not ESBUILD.is_file():
         print("esbuild is missing. Run npm ci before building the desktop UI.", file=sys.stderr)
@@ -66,8 +75,7 @@ def main() -> int:
     # windowless process would flash a black window on the desktop.
     said = subprocess.run(
         [
-            "node",
-            str(ESBUILD),
+            *esbuild(),
             str(ENTRY),
             "--bundle",
             "--format=iife",
