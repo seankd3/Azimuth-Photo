@@ -893,6 +893,9 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 .keys-body { columns: 2; column-gap: 32px; max-height: 60vh; overflow-y: auto; }
 @media (max-height: 900px) { .keys-body { columns: 1; } }
 .keys-body .eyebrow { margin: 14px 0 6px; break-after: avoid; }
+/* the build, said once at the foot: what to quote when something is wrong */
+.keys-foot { margin: 16px 0 0; color: var(--text-3); font: var(--t-label)/1 var(--mono); letter-spacing: .04em; }
+.keys-foot:empty { display: none; }
 .keys-body .eyebrow:first-child { margin-top: 0; }
 .keys { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; margin: 0; font-size: var(--t-meta); break-inside: avoid; }
 .keys dt { color: var(--text-2); white-space: nowrap; }

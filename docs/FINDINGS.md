@@ -704,7 +704,7 @@ finding was checked and the numbers said no.
 | PF2 | A window that closed by itself left nothing to read | `logs/azimuth.log` under the home (rotating, 2 MB × 3) and every uncaught error on any thread written to it | shipped |
 | PF3 | Nobody knew how long the app takes from click to first grid | every launch marks it in its own log: window shown +1.74 s, first page answered +2.47 s through the launcher on a loaded machine; budgeted in `docs/PERF_BUDGETS.md` (≤ 2 s / ≤ 3 s) | shipped |
 | PF4 | An import's progress lives only in the panel and the status line | the taskbar button carries it (ITaskbarList3 progress), the way every professional app's long job does | open |
-| PF5 | The app never says which build it is | the keys sheet's foot says Azimuth Photo · 2026.9.12 (commit), read from the launcher's version resource or git | open |
+| PF5 | The app never says which build it is | the keys sheet's foot says Azimuth Photo · commit · date, read from the checkout's own files; what to quote when something is wrong | shipped |
 
 ## Refutation of the sitting (2026-09-12, by a second model)
 

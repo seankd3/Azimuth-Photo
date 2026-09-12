@@ -235,6 +235,24 @@ class Desktop:
 
     # ---- the home ----
 
+    def version(self) -> dict:
+        """Which build this is: the checkout's commit and when it was made,
+        read from the repository's own files (no git process), or the
+        frozen bundle's stamp."""
+
+        root = Path(__file__).resolve().parents[1]
+        try:
+            head = (root / ".git" / "HEAD").read_text(encoding="utf-8").strip()
+            commit = head
+            if head.startswith("ref:"):
+                commit = (root / ".git" / head.split(" ", 1)[1].strip()).read_text(encoding="utf-8").strip()
+            last = (root / ".git" / "logs" / "HEAD").read_text(encoding="utf-8").strip().splitlines()[-1]
+            stamp = int(last.split(">", 1)[1].split()[0])
+            when = time.strftime("%d %b %Y", time.localtime(stamp))
+            return {"commit": commit[:8], "when": when}
+        except (OSError, IndexError, ValueError):
+            return {"commit": "", "when": ""}
+
     def home(self) -> str | None:
         return self._home
 

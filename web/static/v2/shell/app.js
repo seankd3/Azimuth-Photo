@@ -1974,6 +1974,14 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (event.key === '?' && !isTyping) {
+    // The build, said at the sheet's foot: what to quote when something
+    // is wrong. Asked once; the checkout does not change under a window.
+    const foot = keysDialog.querySelector('[data-keys-foot]');
+    if (!foot.textContent) {
+      product.version().then((v) => {
+        foot.textContent = ['Azimuth Photo', v.commit, v.when].filter(Boolean).join(' \u00b7 ');
+      }).catch(() => {});
+    }
     keysDialog.showModal();
     event.preventDefault();
     return;
