@@ -1405,8 +1405,9 @@ async function mergeSweep(photo) {
     return;
   }
   notify('Merging the sweep\u2026');
-  const made = await product.mergePreview(photo.id).catch((error) => { notify(why(error)); return null; });
-  if (!made) { notify('The frames could not be merged.'); return; }
+  const made = await product.mergePreview(photo.id).catch((error) => { notify(why(error)); return undefined; });
+  if (made === null) notify('The frames could not be merged.');
+  if (!made) return;
   const current = read().selected;
   if (current?.id !== photo.id) return;
   update({ selected: { ...current, sweep: { ...current.sweep, preview: made } } });
@@ -1435,7 +1436,9 @@ function showPhoto(photo) {
 document.querySelector('[data-loupe-note]').setAttribute('role', 'status');
 function renderLoupe(photo) {
   // A merged panorama stands in for its frame: shown as a preview (its
-  // own pixels, no larger truth behind it), until the loupe closes.
+  // own pixels, no larger truth behind it), until the loupe closes or an
+  // edit begins -- Develop paints the frame, never the merge.
+  if (editPanel.isOpen()) merged = null;
   const stand = merged && merged.id === photo.id ? merged : null;
   if (stand) photo = { ...photo, develop: true, loupe: stand.url, width: stand.width, height: stand.height };
   const source = photo.loupe || photo.tile || '';
@@ -1460,6 +1463,8 @@ let facing = { id: null, at: -1 };
 async function focusFace(photo) {
   const boxes = await product.faces(photo.id).catch(() => []);
   if (!boxes.length) { notify('No face has been read on this photograph.'); return; }
+  // A face is on the frame, not on the merge the loupe may be standing in.
+  if (merged) { merged = null; renderLoupe(photo); }
   facing = { id: photo.id, at: facing.id === photo.id ? (facing.at + 1) % boxes.length : 0 };
   const [x, y, w, h] = boxes[facing.at];
   // A breath above the box's centre: the eyes.

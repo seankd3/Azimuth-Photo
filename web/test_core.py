@@ -1480,6 +1480,20 @@ class CacheRefuses(CoreCase):
         self.assertEqual(cache.evict(self.conn, 0, (self.kind, embedding)), [("test_thumb", "/t.jpg")])
         self.assertIsNotNone(cache.get(self.conn, "h1", embedding))
 
+    def test_the_ceiling_unlinks_a_file_of_a_kind_the_worker_was_not_given(self):
+        # Every evictable kind is evicted, not only the worker's; a merge
+        # preview's row died on its name and left the batch's files on disk
+        # (X166). The file goes with the row.
+        merge = cache.Kind(name="merge", compute=lambda source, hash: cache.Made(), evictable=True)
+        path = os.path.join(self.tmp, "merge.jpg")
+        with open(path, "wb") as made:
+            made.write(b"x" * 3000)
+        cache.put(self.conn, "h1", merge, cache.Made(path=path, bytes=3000), {})
+        self.conn.commit()
+        self.assertEqual(work.sweep_cache(self.conn, 0, (self.kind,)), 1)
+        self.assertFalse(os.path.exists(path))
+        self.assertIsNone(cache.get(self.conn, "h1", merge, {}))
+
     def test_a_projection_failure_never_costs_the_computed_answer(self):
         # The projection is a derived index reindex rebuilds on every open;
         # its failure is a moment, not a fact about the photograph. The old

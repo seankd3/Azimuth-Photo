@@ -443,7 +443,9 @@ def sweep_cache(conn, ceiling_bytes: int, kinds: Iterable[cache.Kind]) -> int:
     by_name = {kind.name: kind for kind in kinds}
     dropped = cache.evict(conn, ceiling_bytes, kinds)
     for name, path in dropped:
-        remove = by_name[name].remove or _unlink
+        # A kind the worker was not handed (the sweep's merge) is evicted
+        # too, and its file is a file.
+        remove = (by_name[name].remove if name in by_name else None) or _unlink
         try:
             remove(path)
         except OSError:

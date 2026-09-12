@@ -175,6 +175,7 @@ KIND = cache.Kind(name="sweep", compute=lambda source, hash: None, params=("mode
 MERGE = cache.Kind(name="merge", compute=lambda source, hash: None, params=("model", "run"), evictable=True,
                    remove=lambda path: os.path.isfile(path) and os.unlink(path))
 MERGE_KEY = "stitch1"   # the merge's version
+LOUPE_MOST = 8          # frames merged from the 4,096 px tiles; longer runs from the 1,024
 
 
 def _tile_of(tiles, size: int):
@@ -293,9 +294,18 @@ def preview(conn, tiles, sweep: dict) -> dict | None:
     frames = [dict(r) for r in conn.execute(
         f"SELECT id, content_hash AS hash, develop FROM images WHERE id IN ({','.join('?' * len(sweep['members']))})"
         " ORDER BY date_taken ASC, id ASC", sweep["members"])]
+    # One size for every frame: the stitcher scales by its first image, and
+    # a mixed set drops frames or fails. The loupes when every frame has
+    # one and the run is short enough to hold at 4,096 px (eight frames is
+    # a third of a gigabyte before the stitcher's own copies); else the
+    # grid tiles, which every frame of a judged sweep has.
     loupe_of, grid_of = _tile_of(tiles, render.LOUPE), _tile_of(tiles, render.GRID)
-    paths = [loupe_of(f) if os.path.isfile(loupe_of(f)) else grid_of(f) for f in frames]
-    pano = merge(paths) if all(os.path.isfile(p) for p in paths) else None
+    paths = [loupe_of(f) for f in frames]
+    if len(frames) > LOUPE_MOST or not all(os.path.isfile(p) for p in paths):
+        paths = [grid_of(f) for f in frames]
+    if not all(os.path.isfile(p) for p in paths):
+        return None   # not drawn yet: not a refusal, nothing remembered
+    pano = merge(paths)
     if pano is None:
         cache.failed(conn, sweep["first"], MERGE, "the stitcher could not place the frames", recipe)
         conn.commit()
