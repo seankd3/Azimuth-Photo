@@ -783,6 +783,8 @@ finding was checked and the numbers said no.
 | LR14 | Two lines still said photo | photograph | shipped |
 | LR15 | Three counts named no unit or grouped no digits | `numbered` | shipped |
 | LR16 | Space picks in Rank and the sheet said only Enter | Enter / Space | shipped |
+| LR17 | LR2's clear ran on the render N fires before Rank opens, so a survey never reached Rank (caught by this session's proof) | the survey is cleared only when the view leaves Rank or a look from it (`viewShown`); proven: N on three marked frames ranks "3 marked photographs", the All photographs door ends it | shipped |
+| LR18 | LR3's failed source was never cleared, so a source that later loaded would still wear the note | cleared with the loupe | shipped |
 
 ## Import and inspector (seventh round, 2026-09-12 night, audited by a second model)
 

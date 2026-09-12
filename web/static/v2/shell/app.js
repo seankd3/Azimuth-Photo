@@ -798,7 +798,7 @@ function closeLoupe() {
   if (loupe.classList.contains('is-full')) toggleFull(false);
   const back = loupeReturnsTo || 'library';
   loupeReturnsTo = null;
-  if (loupeOpen()) update({ view: back, merged: null, ...(back === 'rank' ? { selected: null } : {}) });
+  if (loupeOpen()) update({ view: back, merged: null, troubled: null, ...(back === 'rank' ? { selected: null } : {}) });
   // The strip keeps its cells: a reopen finds them where they were and
   // rebuilds only what differs, instead of flashing an empty band.
   loupeView.reset();
@@ -1863,9 +1863,13 @@ function render(state) {
   // The merge stands in only while the loupe is up: a chip, a name, a
   // folder or an album can leave the loupe without closing it.
   if (state.view !== 'loupe' && state.merged) { update({ merged: null }); return; }
-  // A survey is Rank's own round: it ends when the view is neither Rank
-  // nor a look taken from it, whichever door was used.
-  if (state.survey && !['rank', 'loupe'].includes(state.view)) { update({ survey: null }); return; }
+  // A survey is Rank's own round: it ends when the view leaves Rank (or a
+  // look taken from it), whichever door was used. Leaves: N sets the
+  // survey a moment before Rank opens, and that is not a leaving.
+  if (state.survey && !['rank', 'loupe'].includes(state.view) && ['rank', 'loupe'].includes(viewShown)) {
+    update({ survey: null });
+    return;
+  }
   // Chrome first: it is what shows and hides the grid, and a grid laid out
   // while still hidden measures a zero-width column.
   renderChrome(state);
