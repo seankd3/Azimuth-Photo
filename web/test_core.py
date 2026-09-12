@@ -2899,6 +2899,23 @@ class ARoundFindsTheTop(CoreCase):
         self.assertGreaterEqual(len(days), 5, days)
         self.assertTrue(set(others) & {p["id"] for p in spread})
 
+    def test_diverse_does_not_seat_one_shoot_because_it_was_filed_first(self):
+        # Sixty frames from one evening filed first, then one frame from each
+        # of twelve other days, nothing judged yet. The least-worn tier is a
+        # tie across all seventy-two; a tie broken by filing order was the
+        # evening alone, and a diverse round of six was six of the evening
+        # (the owner, 09-12: "diverse rank mode still shows images from the
+        # same sequence on the same grid").
+        for i in range(60):
+            self._at(f"Raws/evening{i}.cr3", f"2026-05-26 21:{i // 60:02d}:{i % 60:02d}")
+        others = [self._at(f"Raws/day{i}.cr3", f"2025-{i + 1:02d}-01 12:00:00") for i in range(12)]
+        self.conn.commit()
+        for _ in range(5):
+            spread = rank.candidates(self.conn, 6, mode="diverse")[:6]
+            days = {str(p["date_taken"])[:10] for p in spread}
+            self.assertGreaterEqual(len(days), 4, days)
+        self.assertTrue(set(others) & {p["id"] for p in spread})
+
 
 class AnEditIsADecision(CoreCase):
     """Develop's ground rules: Lightroom's sidecar reads into a decision in
