@@ -1,119 +1,204 @@
 export const meta = {
   name: 'seams',
-  description: 'Check every client call against the route it calls: params, shapes, repetition, types',
+  description: 'Check every client call against the verb it calls, and the harness stub against both: params, shapes, nulls, repetition',
   whenToUse: 'Hunting the class of bug where two sides of one boundary disagree and neither side is wrong on its own.',
   phases: [
-    { title: 'Map', detail: 'inventory both sides of the boundary' },
-    { title: 'Compare', detail: 'one agent per surface area' },
-    { title: 'Confirm', detail: 'prove the mismatch bites' },
+    { title: 'Survey', detail: 'one agent per slice of the bridge' },
+    { title: 'Refute', detail: 'prove the mismatch bites' },
+    { title: 'Fix', detail: 'one worktree per real mismatch' },
   ],
 }
-
 const HOUSE = `
-Azimuth Photo, branch "simplify". FastAPI backend in web/, vanilla-JS clients in
-web/static/js/desktop and /mobile, Kotlin in android/, Tauri shell in desktop/.
+You are working in Azimuth Photo: a Windows-first desktop photo app, one Python 3.12
+process (web/desktop.py opens a pywebview window on one bundled document and hands it
+the verbs; web/boot.py is the product boundary, Library / OwnedLibrary; web/model/ the
+five tables), a vanilla-JS UI in web/static/v2/ bundled by esbuild, SQLite. AGENTS.md is
+the contract; read it first. docs/FINDINGS.md is the ledger of what past rounds found and
+how they closed; docs/ui-architecture.md is the UI canon (the bar, the speed covenant,
+the interaction canon, the vocabulary); docs/REWRITE_LEDGER.md says what is Proven.
 
-You are hunting seam defects: a place where the caller and the callee each look
-correct alone and disagree with each other. The one that motivated this workflow:
-the sidebar sent one "folder=" per selected node, /api/mosaic/next declared
-"folder: str", FastAPI kept only the LAST value, and Refine silently scoped to a
-third of what the user picked. It showed as "Not enough photos to refine" on a
-195-photo selection. Nothing in either file looked wrong.
+You are in a Linux cloud container: 4 CPUs, no GPU, no display. The window cannot open.
+What you have instead, all from the repository root unless said otherwise:
+  ./scripts/azimuth-check            lint, gates, 280+ tests, node specs, ledger, the build; ~60 s
+  ./scripts/azimuth-check --quick    lint and gates only
+  ~/Azimuth Test/Photos              the development library: 31 public-domain photographs
+                                     and one duplicate in Edits / Raws/Digital / Snapshots
+                                     (built by scripts/make_test_library.py; PROVENANCE.md inside)
+  a Library on it, from web/:        import boot, work; p = boot.Library(catalog, tiles);
+                                     d = p.attach(root); p.refresh(d["uuid"]); p.browse();
+                                     work.step(p.conn, kinds) runs the worker one step.
+                                     web/test_core.py has every idiom. Always an isolated home
+                                     under /tmp; never a real catalog.
+  node scripts/harness_proof.mjs out.png --probe a.js [--probe b.js]
+                                     the UI headless: build/harness.html (the whole UI on a fake
+                                     bridge with 124 photographs, in scripts/harness.py's STUB) in
+                                     headless Chromium; each probe is JavaScript evaluated in the
+                                     page, printed as a PROBE line; a screenshot at the end. Shape
+                                     and behaviour, never pixels. scripts/journeys/*.js are probes.
+  scripts/bench.py <catalog.db>      times the product boundary's verbs on a copy of a catalog.
+  the bridge seam                    web/static/v2/net/index.js (every call the UI makes) ->
+                                     web/desktop.py (the verbs) -> web/boot.py (the Library).
 
-Shapes of this defect worth looking for:
-  - a repeated query parameter received as a scalar (or vice versa)
-  - a client sending a comma-joined string where the route parses a list
-  - a field the client reads that the route never returns, or returns under
-    another name, so the UI silently renders a default
-  - a type the client assumes (number) that the route can return as null
-  - a default that differs between the route signature and the service function
-  - a route the client calls with params the route does not declare at all
-  - pagination/limit semantics that differ between caller and callee
-
-Verify against the running app rather than by reading alone where you can:
-  cd web && AZIMUTH_HOME="$TEMP/seams" AZIMUTH_MODE=standalone ./.venv/Scripts/python.exe -m uvicorn app:app --port 8031
-then curl it. Its OpenAPI schema is at /openapi.json and is the authority on what
-each route declares. Do not edit any file.
+Rules that cost this project real time to learn:
+1. "Nothing calls it" is evidence about clients, not intent. Before calling anything dead,
+   also check scripts/, .github/workflows/, .claude/, docs/, MASTER_PLAN.md's open rows, and
+   the bridge table in web/static/v2/net/index.js.
+2. Edit by hand. Never regex-sweep the codebase.
+3. Behaviour-preserving means proven: a test that fails before and passes after, or a
+   measurement before and after, pasted. Not asserted.
+4. No test over 10 s (pytest.ini enforces it). Every file added under web/ or scripts/ needs a
+   row in docs/REWRITE_LEDGER.md or scripts/rewrite_status.py --check fails the build.
+5. Stage explicit paths, never git add -A. Commit messages are plain prose: what changed, why,
+   what was measured.
+6. Vocabulary is fixed: Rank, Best, Picked / Rejected, Albums, Labels, People, Folders,
+   Drives, Trash, photographs. One aria word per element: a button says aria-pressed, an
+   option aria-selected, the keyboard's cursor aria-current.
+7. Quality over features. This round changes nothing a person would call a new feature.
 `
 
-const MISMATCH = {
+const WORKTREE = `
+You are in a fresh git worktree on its own branch. It lacks web/.venv and node_modules (both
+ignored). Before any check run, in the worktree root:
+  export AZIMUTH_VENV=/home/user/Azimuth-Photo/web/.venv
+  ln -s /home/user/Azimuth-Photo/node_modules node_modules
+Then ./scripts/azimuth-check must be green before you commit; paste its last lines. For a UI
+change, also run node scripts/harness_proof.mjs with a probe that shows the behaviour you
+changed, and paste the PROBE line. Commit on the branch you are on. Report the commit hash
+(git rev-parse HEAD) and the exact check output. Do not push. If the change turns out wrong,
+or needs a product decision, stop with applied=false and say why: that is a good outcome.
+`
+
+const FINDING = {
   type: 'object',
-  required: ['mismatches'],
+  required: ['findings'],
   properties: {
-    mismatches: {
+    findings: {
       type: 'array',
       items: {
         type: 'object',
-        required: ['route', 'client_file', 'client_line', 'server_file', 'server_line', 'disagreement', 'user_visible_effect'],
+        required: ['title', 'file', 'line', 'why', 'fix', 'risk'],
         properties: {
-          route: { type: 'string' },
-          client_file: { type: 'string' },
-          client_line: { type: 'integer' },
-          server_file: { type: 'string' },
-          server_line: { type: 'integer' },
-          disagreement: { type: 'string', description: 'what each side believes' },
-          user_visible_effect: { type: 'string', description: 'what a person would see; "none observable" is an honest answer' },
-          confidence: { type: 'string', enum: ['certain', 'likely', 'speculative'] },
+          title: { type: 'string', description: 'one line, the claim itself' },
+          file: { type: 'string' },
+          line: { type: 'integer' },
+          evidence: { type: 'string', description: 'what you observed: a PROBE line, a measurement, other file:line sites' },
+          why: { type: 'string', description: 'what goes wrong for a photographer using the app' },
+          fix: { type: 'string', description: 'the concrete change, in one sentence' },
+          risk: { type: 'string', enum: ['low', 'medium', 'high'] },
         },
       },
     },
   },
 }
 
-const CONFIRMED = {
+const VERDICT = {
   type: 'object',
-  required: ['real', 'evidence'],
+  required: ['refuted', 'reason'],
   properties: {
-    real: { type: 'boolean' },
-    evidence: { type: 'string', description: 'the request made and the response got, or why it cannot bite' },
-    fix: { type: 'string' },
+    refuted: { type: 'boolean' },
+    reason: { type: 'string' },
   },
 }
 
-const AREAS = [
-  { key: 'library', ask: 'The grid and its scope: /api/rankings, /api/counts, /api/date-groups, /api/date-histogram, /api/filter-options, /api/map/markers. Focus on how scope params (folder, date_taken, people, ids, exclude_sources) travel.' },
-  { key: 'refine', ask: 'Ranking: /api/mosaic/next, /api/mosaic/pick, /api/compare, /api/compare/undo, /api/propagation/last. Focus on what the client sends per pick and what it reads back.' },
-  { key: 'develop', ask: 'Editing and export: the develop settings routes, /api/export, preview and thumb routes. Focus on setting names and numeric types crossing the boundary.' },
-  { key: 'collections', ask: 'Collections, shares and publishing routes. Focus on id list shapes, smart-collection queries, and fields the gallery template reads.' },
-  { key: 'android', ask: 'The Kotlin client in android/. It hand-writes URLs and parses JSON by field name, so it drifts silently. Compare what it sends and reads against the routes it calls.' },
+const OUTCOME = {
+  type: 'object',
+  required: ['applied', 'summary'],
+  properties: {
+    applied: { type: 'boolean' },
+    summary: { type: 'string', description: 'what changed, in plain prose; or why not' },
+    commit: { type: 'string', description: 'git rev-parse HEAD after the commit' },
+    branch: { type: 'string' },
+    checks: { type: 'string', description: 'the exact tail of ./scripts/azimuth-check and any PROBE lines' },
+    ledger_row: { type: 'string', description: 'one FINDINGS.md table row in the file\'s voice: | id | finding | fix | status |, id left blank' },
+  },
+}
+
+// One round stays small enough to read and to land by one hand; the loop is
+// what gets coverage. Safest first: an unattended edit should be cheap to be wrong.
+const RANK = { low: 0, medium: 1, high: 2 }
+
+async function round(scouts, perRound, fixExtra) {
+  phase('Survey')
+  const surveyed = await parallel(
+    scouts.map((scout) => () =>
+      agent(
+        `${HOUSE}\n\nYou are the "${scout.key}" scout.\n\n${scout.ask}\n\n` +
+          `Read the code and, where the harness or a Library can show it, observe rather than infer. ` +
+          `Return at most 4 findings, the strongest first. A finding with no concrete fix is not a ` +
+          `finding; a finding already closed in docs/FINDINGS.md is not a finding. Do not edit any file.`,
+        { label: `survey:${scout.key}`, phase: 'Survey', schema: FINDING },
+      ),
+    ),
+  )
+  const found = surveyed.filter(Boolean).flatMap((r, i) => (r.findings || []).map((f) => ({ ...f, scout: scouts[i].key })))
+  const seen = new Set()
+  const unique = found.filter((f) => { const k = `${f.file}:${f.line}`; if (seen.has(k)) return false; seen.add(k); return true })
+  const ordered = unique.sort((a, b) => (RANK[a.risk] ?? 3) - (RANK[b.risk] ?? 3))
+  const queue = ordered.slice(0, perRound)
+  const deferred = ordered.slice(perRound)
+  log(`${found.length} findings, ${unique.length} distinct, taking ${queue.length}`)
+  if (deferred.length) log(`deferred: ${deferred.map((f) => f.title).join(' | ')}`)
+  if (!queue.length) return { found: 0, landed: [], refuted: [], held: [], deferred: [] }
+
+  const results = await pipeline(
+    queue,
+    (f) =>
+      agent(
+        `${HOUSE}\n\nTry to REFUTE this claim. Default to refuted=true when uncertain.\n\n` +
+          `Claim: ${f.title}\nAt: ${f.file}:${f.line}\nEvidence given: ${f.evidence || 'none'}\n` +
+          `Why it matters: ${f.why}\nProposed fix: ${f.fix}\n\n` +
+          `Refute it if: the behaviour is already as the canon asks; the fix would change something a ` +
+          `person relies on; the claim rests on a misreading; docs/FINDINGS.md already closed or rejected ` +
+          `it with a reason; or the cost outweighs what a photographer would notice. Read the code; run ` +
+          `the harness or a Library if that settles it. Do not edit any file.`,
+        { label: `refute:${f.file.split('/').pop()}:${f.line}`, phase: 'Refute', schema: VERDICT },
+      ).then((v) => ({ finding: f, verdict: v })),
+    (checked) => {
+      if (!checked || !checked.verdict || checked.verdict.refuted) return checked
+      const f = checked.finding
+      return agent(
+        `${HOUSE}\n${WORKTREE}\n\nMake this change. It survived an adversarial review.\n\n` +
+          `${f.title}\nAt: ${f.file}:${f.line}\nFix: ${f.fix}\nWhy: ${f.why}\n\n${fixExtra}\n\n` +
+          `Add a refuter when one can exist (a test that fails before and passes after), keep the change ` +
+          `to what the finding needs, and write the FINDINGS.md row for it in your answer rather than ` +
+          `editing that file.`,
+        { label: `fix:${f.file.split('/').pop()}`, phase: 'Fix', schema: OUTCOME, isolation: 'worktree' },
+      ).then((out) => ({ ...checked, outcome: out }))
+    },
+  )
+  const done = results.filter(Boolean)
+  return {
+    found: found.length,
+    distinct: unique.length,
+    landed: done.filter((r) => r.outcome && r.outcome.applied).map((r) => ({ title: r.finding.title, file: r.finding.file, commit: r.outcome.commit, branch: r.outcome.branch, summary: r.outcome.summary, checks: r.outcome.checks, ledger_row: r.outcome.ledger_row })),
+    refuted: done.filter((r) => r.verdict && r.verdict.refuted).map((r) => ({ title: r.finding.title, reason: r.verdict.reason })),
+    held: done.filter((r) => r.outcome && !r.outcome.applied).map((r) => ({ title: r.finding.title, why: r.outcome.summary })),
+    deferred: deferred.map((f) => ({ title: f.title, file: f.file, line: f.line, fix: f.fix, risk: f.risk })),
+  }
+}
+
+const SEAM = `The seam is three files deep: web/static/v2/net/index.js (every call the UI makes, with its
+argument shape), web/desktop.py (the verbs pywebview exposes: positional arguments, coercions,
+return dicts), web/boot.py (the Library's answers). A fourth side lies: scripts/harness.py's STUB,
+the fake bridge the harness UI runs on, which must answer with the same keys and shapes as the real
+verbs or every harness proof proves the wrong thing. Shapes of the defect: a key the UI reads that
+the verb never returns or returns under another name (the UI renders a default in silence); a type
+the UI assumes (number, array) that the verb can return as null; a default that differs between
+net/index.js, desktop.py and boot.py; an argument the UI passes that the verb ignores; an id passed
+as a string where the verb wants an int; an optional the stub answers that the real verb does not
+(or the reverse); an error path the UI's catch(() => {}) hides. The UI's consumers are in
+web/static/v2/shell/*.js and lens/*.js; grep each net function's callers and read what they read.`
+
+const SLICES = [
+  { key: 'browse-and-scope', ask: `${SEAM}\n\nSlice: photos, size, position, identifiers, days, folders, facets, cameras, sessions, look, counts, pulse, drives, attached, refresh, synchronize, forget_missing.` },
+  { key: 'cull-and-decisions', ask: `${SEAM}\n\nSlice: pick, clear_pick, reject, restore, undo_cull, turn, stack, unstack, merge_preview, forget, trash_photos, trash_count, empty_trash, round, unround, rank.` },
+  { key: 'albums-search-labels', ask: `${SEAM}\n\nSlice: search, albums, create/rename/forget/remember/freeze/redefine_album, add_to/remove_from_album, quick, save_view, save_photos, labels, teach, rename_label, forget_label.` },
+  { key: 'people-develop-export', ask: `${SEAM}\n\nSlice: people, faces, maybe_same, same_people, keep_apart, name_person, unname_person, unname_since, photo, develop, develop_preview, develop_state, export_settings, export_photos, adopt_track.` },
+  { key: 'intake-and-home', ask: `${SEAM}\n\nSlice: cards, stage, bring, intake_status, stop_intake, thumb, attach, choose_folder, home, propose_home, settle_home, version, report.` },
+  { key: 'harness-stub', ask: `${SEAM}\n\nSlice: the STUB in scripts/harness.py against web/desktop.py as a whole: every verb the UI can call must exist in the stub with an answer of the real shape; every key the UI reads from a stub answer must be one the real verb returns. List what the stub lacks or answers wrongly, ranked by which harness proofs it would make lie.` },
 ]
 
-phase('Map')
-const found = await parallel(
-  AREAS.map((area) => () =>
-    agent(
-      `${HOUSE}\n\nSurface area: ${area.key}.\n${area.ask}\n\n` +
-        `For each route in your area, read the client call site AND the route signature AND ` +
-        `the service function behind it. Report only genuine disagreements, at most 4, strongest first. ` +
-        `"Both sides agree" is a fine result — say so rather than inventing something.`,
-      { label: `map:${area.key}`, phase: 'Map', schema: MISMATCH },
-    ),
-  ),
-)
-
-const all = found.filter(Boolean).flatMap((r) => r.mismatches || [])
-const worth = all.filter((m) => m.confidence !== 'speculative')
-log(`${all.length} mismatches reported, ${worth.length} above speculative`)
-if (!worth.length) return { mismatches: [], note: 'both sides agreed everywhere checked' }
-
-phase('Confirm')
-const confirmed = await parallel(
-  worth.slice(0, 8).map((m) => () =>
-    agent(
-      `${HOUSE}\n\nProve or disprove this by MAKING THE REQUEST, not by reading.\n\n` +
-        `Route: ${m.route}\nClaim: ${m.disagreement}\nExpected effect: ${m.user_visible_effect}\n` +
-        `Client: ${m.client_file}:${m.client_line}\nServer: ${m.server_file}:${m.server_line}\n\n` +
-        `Boot the app on a scratch home, send the request the client would send, and show what came ` +
-        `back. If the mismatch cannot actually bite — the value is unused, the shapes coincide, the ` +
-        `path is dead — say real=false and why. Do not edit source.`,
-      { label: `confirm:${m.route}`, phase: 'Confirm', schema: CONFIRMED },
-    ).then((v) => ({ ...m, verdict: v })),
-  ),
-)
-
-const real = confirmed.filter(Boolean).filter((m) => m.verdict?.real)
-return {
-  checked: all.length,
-  confirmed: real.map((m) => ({ route: m.route, disagreement: m.disagreement, effect: m.user_visible_effect, evidence: m.verdict.evidence, fix: m.verdict.fix })),
-  dismissed: confirmed.filter(Boolean).filter((m) => !m.verdict?.real).length,
-}
+const result = await round(SLICES, 6,
+  `A seam fix changes the side that is wrong, never both to meet in the middle; say which side and
+why in the commit. A stub fix is a fix too: the harness must tell the truth.`)
+return result
