@@ -66,6 +66,9 @@ change, also run node scripts/harness_proof.mjs with a probe that shows the beha
 changed, and paste the PROBE line. Commit on the branch you are on. Report the commit hash
 (git rev-parse HEAD) and the exact check output. Do not push. If the change turns out wrong,
 or needs a product decision, stop with applied=false and say why: that is a good outcome.
+Elegance, not bloat: smallness is a consequence of the change having the shape of the problem;
+delete what the fix makes unnecessary in the same commit, add no machinery, and prefer the
+change that leaves fewer lines and fewer concepts. Say in the commit what was removed.
 `
 
 const FINDING = {
