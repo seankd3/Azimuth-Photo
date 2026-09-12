@@ -1,0 +1,56 @@
+# Personal data
+elo_ratings.json
+blacklist.json
+
+# Runtime / caches
+web/.venv/
+web/.cache/
+web/.embedcache/
+web/.thumbcache/
+web/.models/
+web/.run/
+web/settings.local.json
+web/*.db
+web/*.db-shm
+web/*.db-wal
+web/pixels/profiles/adobe/
+__pycache__/
+
+# Tools
+.codex
+.gstack/
+# Agent-facing source travels with the repository; the rest of .claude/ is
+# this machine's runtime (worktrees, launch configuration). A directory that
+# is itself excluded cannot have its contents re-included, so exclude the
+# children and name the two that are source.
+.claude/*
+!.claude/skills/
+!.claude/workflows/
+AGENTS.local.md
+
+# Local audits and build outputs
+cleanup/
+outputs/
+dist/
+build/
+*.spec
+receipts/
+bench-runs/
+bench/
+
+# Server packaging scratch (never the shared web/.venv)
+.pkg-venv/
+
+# DB backups and generated desktop output
+web/*.bak
+
+android/local.properties
+
+node_modules/
+
+# local pregen diagnosis artifacts
+.diag/
+
+# scratch run dumps
+now*.txt
+baseline.txt

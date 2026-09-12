@@ -1,0 +1,86 @@
+{
+  "slug": "kodak-colorplus-200",
+  "name": "Kodak ColorPlus 200",
+  "iso": 200,
+  "process": "C-41",
+  "type": "negative_color",
+  "white_point_hint": "daylight",
+  "white_point_kelvin": 5500,
+  "hd_curves": {
+    "r": [
+      [-2.0, 0.02],
+      [-1.2, 0.06],
+      [-0.6, 0.11],
+      [0.0, 0.15],
+      [0.6, 0.49],
+      [1.2, 0.82],
+      [1.8, 1.12],
+      [2.6, 1.38]
+    ],
+    "g": [
+      [-2.0, 0.02],
+      [-1.2, 0.06],
+      [-0.6, 0.11],
+      [0.0, 0.15],
+      [0.6, 0.48],
+      [1.2, 0.81],
+      [1.8, 1.11],
+      [2.6, 1.37]
+    ],
+    "b": [
+      [-2.0, 0.02],
+      [-1.2, 0.05],
+      [-0.6, 0.10],
+      [0.0, 0.15],
+      [0.6, 0.46],
+      [1.2, 0.78],
+      [1.8, 1.07],
+      [2.6, 1.33]
+    ]
+  },
+  "spectral_crosstalk": [
+    [0.81, 0.14, 0.05],
+    [0.09, 0.79, 0.12],
+    [0.04, 0.18, 0.78]
+  ],
+  "dir_coupler": [
+    [1.0, -0.05, -0.04],
+    [-0.05, 1.0, -0.06],
+    [-0.03, -0.05, 1.0]
+  ],
+  "grain": {
+    "rms_granularity": 6.5,
+    "size_px_at_4k": 2.7,
+    "shadow_bias": 0.7,
+    "r": {
+      "rms_granularity": 6.5,
+      "size_px_at_4k": 2.7,
+      "shadow_bias": 0.7
+    },
+    "g": {
+      "rms_granularity": 6.5,
+      "size_px_at_4k": 2.7,
+      "shadow_bias": 0.7
+    },
+    "b": {
+      "rms_granularity": 6.5,
+      "size_px_at_4k": 2.7,
+      "shadow_bias": 0.7
+    }
+  },
+  "halation": {
+    "amount": 0.06,
+    "threshold": 0.62,
+    "radius_frac": 0.026,
+    "green_fraction": 0.08
+  },
+  "base": {
+    "orange_mask_rgb": [0.95, 0.57, 0.25],
+    "base_fog_density": 0.11
+  },
+  "print_paper": {
+    "gamma": 2.5,
+    "shoulder": 0.82
+  },
+  "notes": "H&D approx from memory of the Kodak ColorPlus 200 (Kodacolor-era emulsion) datasheet; straight-line gamma ~0.56-0.58, softer contrast than Gold 200 with a gentle shoulder and a slightly lazy blue layer - the vintage warm/yellow ColorPlus cast. ESTIMATED nearly everything numeric: ColorPlus's published technical data is thin (older-generation emulsion), so spectral crosstalk (wide old-tech layer overlap), weakest-in-set DIR (its muted separation), rms_granularity 6.5 (grainier than Gold 200's 5.5, consistent with the older grain tech - NOT a datasheet RMS), halation, extra-warm orange mask, and print paper are all reasoned estimates around the Gold 200 file. Grain pitch/shadow_bias engine-derived; grain keys flattened for the engine. Real ColorPlus lab scans exist under /mnt/expansion/Photos/Film Scans (README inventory) - untuned so far, candidate for a scan-tuning pass. 2026-07-11"
+}

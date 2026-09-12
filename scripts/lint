@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# ruff over the product, eslint over the UI. Fail fast; skip nothing silently.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+VENV="${AZIMUTH_VENV:-$ROOT/web/.venv}"
+RUFF="$VENV/bin/ruff"
+[[ -x "$RUFF" ]] || RUFF="$VENV/Scripts/ruff.exe"
+[[ -x "$RUFF" ]] || { echo "lint: ruff not found (install web/requirements-dev.txt into web/.venv)" >&2; exit 2; }
+ESLINT="$ROOT/node_modules/.bin/eslint"
+[[ -x "$ESLINT" ]] || { echo "lint: eslint not found (run npm ci at the repository root)" >&2; exit 2; }
+
+echo "==> ruff"
+(cd web && "$RUFF" check .)
+echo "==> eslint"
+"$ESLINT" web/static/v2 web/test_v2_page_cache.mjs web/test_v2_virtual_grid.mjs
+echo "lint: ok"

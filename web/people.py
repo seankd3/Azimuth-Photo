@@ -1,0 +1,338 @@
+"""A person is a name the owner gives a group of faces.
+
+The group is derived — greedy clustering over every stored face vector,
+rewritten whole on the rank lane's rhythm, like tags and stars — and the
+name is a fact: one decision whose subject is the group's exemplar face
+(`hash:index`), so it survives every re-clustering by landing wherever
+that face lands. Named groups write per-photo rows under their own kind,
+which the same ≈ chips, shelf and search cards already read; unnamed
+groups wait in a summary row as "Someone", holding the faces of the people
+you have not introduced yet.
+"""
+
+from __future__ import annotations
+
+import json
+
+import faces
+from model import decisions
+
+# Two faces closer than this are the same person. ArcFace cosine for the
+# same person runs ~0.5-0.7 and for strangers ~0.1-0.25; 0.5 favours
+# precision — a split person is one Name away from whole, a merged pair of
+# strangers is a lie.
+SAME = 0.5
+# Two groups whose centres sit this close are worth one question: are these
+# the same person? Below it the clusterer keeps them apart on its own.
+NEAR = 0.38
+# What the owner said of a pair: "apart" keeps two groups two people.
+APART = "apart"
+# A person seen in this many photographs is worth a row.
+FLOOR = 3
+FAMILY = "person"
+GROUPS = "@groups"
+
+
+def _faces(conn):
+    """Every stored face: (photo hash, index, score, vector-matrix rows)."""
+
+    import numpy as np
+
+    rows = conn.execute(
+        "SELECT hash, value FROM cache WHERE kind = 'faces' AND recipe = ? AND state = 'ready'"
+        " AND hash != ?",
+        (faces.RECIPE, GROUPS),
+    ).fetchall()
+    owners, scores, stacks, crops = [], [], [], []
+    for row in rows:
+        boxes, det, matrix = faces.unpack(row["value"])
+        for index in range(len(boxes)):
+            owners.append((row["hash"], index))
+            scores.append(det[index])
+            stacks.append(matrix[index])
+            crops.append(boxes[index])
+    if not stacks:
+        return [], [], np.zeros((0, 512), dtype=np.float32), []
+    return owners, scores, np.stack(stacks), crops
+
+
+def _cluster(owners, scores, matrix):
+    """Greedy centroid clustering, strongest detections first: join the
+    nearest group above SAME or start one. Deterministic for one answer."""
+
+    import numpy as np
+
+    order = np.argsort(scores)[::-1]
+    centroids: list = []
+    members: list[list[int]] = []
+    held = np.zeros((0, matrix.shape[1]), dtype=np.float32)
+    for face in order:
+        vec = matrix[face]
+        if len(centroids):
+            sims = held @ vec
+            best = int(sims.argmax())
+            if float(sims[best]) >= SAME:
+                members[best].append(int(face))
+                centroids[best] = centroids[best] + vec
+                held[best] = centroids[best] / (np.linalg.norm(centroids[best]) or 1.0)
+                continue
+        centroids.append(vec.copy())
+        members.append([int(face)])
+        held = np.vstack([held, vec[None, :]])
+    return members
+
+
+def _names(conn) -> dict[str, tuple[str, int]]:
+    """Every exemplar the owner has named: `hash:index` -> (name, when) with
+    the latest decision winning per face, an empty value meaning the name
+    was taken back. `when` orders faces against each other, so a group
+    holding several named faces — a healed split — answers to the newest
+    word said about any of them."""
+
+    out: dict[str, tuple[str, int]] = {}
+    for when, row in enumerate(conn.execute(
+        f"SELECT subject, value FROM decisions WHERE family = ? "
+        f"ORDER BY {decisions.AUTHORITY_SQL} ASC, at ASC, id ASC",
+        (FAMILY,),
+    )):
+        said = decisions.loaded(row)
+        out[str(row["subject"])] = (str(said or ""), when)
+    return {subject: held for subject, held in out.items() if held[0]}
+
+
+def repeople(conn) -> int:
+    """The whole people answer, rewritten: named groups become per-photo
+    rows, every group at least FLOOR strong waits in the summary."""
+
+    owners, scores, matrix, crops = _faces(conn)
+    conn.execute("DELETE FROM cache WHERE kind = 'people'")
+    conn.execute("DELETE FROM cache WHERE kind = 'faces' AND hash = ?", (GROUPS,))
+    if not owners:
+        conn.commit()
+        return 0
+    members = _cluster(owners, scores, matrix)
+    named = _names(conn)
+
+    # A split person heals by name: two groups introduced as the same
+    # person become one group before anything is counted or shown, so the
+    # shelf holds one row with all of them and one better avatar.
+    called: dict[int, str | None] = {}
+    for at, group in enumerate(members):
+        said = [named[key] for face in group
+                if (key := f"{owners[face][0]}:{owners[face][1]}") in named]
+        # The newest word about any of the group's faces: a rename lands on
+        # one exemplar but must outvote the older names a healed split
+        # still carries.
+        called[at] = max(said, key=lambda held: held[1])[0] if said else None
+    folded: dict[str, int] = {}
+    merged: list[tuple[list[int], str | None]] = []
+    for at, group in enumerate(members):
+        who = called[at]
+        if who is not None and who in folded:
+            merged[folded[who]][0].extend(group)
+            continue
+        if who is not None:
+            folded[who] = len(merged)
+        merged.append((list(group), who))
+
+    worn: dict[str, set] = {}
+    summary = []
+    someone = 0
+    for group, name in sorted(merged, key=lambda pair: len(pair[0]), reverse=True):
+        photos = sorted({owners[face][0] for face in group})
+        settled = name is not None
+        if not settled and len(photos) >= FLOOR:
+            # An interim handle, so the person is browsable before they are
+            # introduced — seeing their photographs is how you know who they
+            # are. It renumbers when the groups rewrite; naming settles it.
+            someone += 1
+            name = f"Someone {someone}"
+        if name:
+            for photo in photos:
+                worn.setdefault(photo, set()).add(name)
+        if len(photos) < FLOOR:
+            continue
+        strongest = max(group, key=lambda face: scores[face])
+        exemplar = f"{owners[strongest][0]}:{owners[strongest][1]}"
+        # The faces shown are the person's most typical large faces: among
+        # the group's larger half, nearest the identity centroid first. A
+        # poorly lit or blurred face embeds *atypically* — quality pushes a
+        # vector away from the mean — so centrality quietly filters bad
+        # light without ever metering it.
+        import numpy as np
+
+        centre = matrix[group].mean(axis=0)
+        centre = centre / (np.linalg.norm(centre) or 1.0)
+        typical = {face: float(matrix[face] @ centre) for face in group}
+        big = float(np.median([crops[face][2] * crops[face][3] for face in group]))
+        best = sorted(group, key=lambda face: (
+            crops[face][2] * crops[face][3] >= big, typical[face]), reverse=True)
+        sample, seen = [], set()
+        for face in best:
+            if owners[face][0] in seen:
+                continue
+            seen.add(owners[face][0])
+            sample.append({"hash": owners[face][0], "box": crops[face]})
+            if len(sample) == 3:
+                break
+        summary.append({"name": name, "settled": settled, "exemplar": exemplar,
+                        "photos": len(photos), "faces": len(group), "sample": sample})
+
+    conn.executemany(
+        "INSERT OR REPLACE INTO cache (hash, kind, recipe, state, value, at)"
+        " VALUES (?, 'people', ?, 'ready', ?, unixepoch())",
+        [(photo, faces.RECIPE, json.dumps(sorted(names))) for photo, names in worn.items()],
+    )
+    # The question the wall asks: pairs of groups close enough in the face
+    # space to be one person, nearest first, never a pair the owner kept
+    # apart and never two groups that already answer to the same name. A
+    # No was said about two faces and holds for whichever groups those
+    # faces are in now, so a stronger face taking over an exemplar does not
+    # bring the question back. Two groups whose centres sit even closer
+    # than SAME are still two groups (the clustering is greedy over faces),
+    # and the most confident question of all.
+    group_of = {f"{owners[face][0]}:{owners[face][1]}": at
+                for at, (group, _) in enumerate(merged) for face in group}
+    kept_apart = set()
+    # Each pair's last word: a No taken back is not a No.
+    for row in conn.execute(
+            "SELECT subject, value FROM decisions WHERE family = ? AND id IN"
+            " (SELECT MAX(id) FROM decisions WHERE family = ? GROUP BY subject)", (APART, APART)):
+        if not decisions.loaded(row):
+            continue
+        sides = [group_of.get(face) for face in str(row["subject"]).split("|")]
+        if len(sides) == 2 and None not in sides:
+            kept_apart.add((min(sides), max(sides)))
+    exemplar_of = {}
+    for at, (group, _) in enumerate(merged):
+        if len({owners[face][0] for face in group}) >= FLOOR:
+            strongest = max(group, key=lambda face: scores[face])
+            exemplar_of[at] = f"{owners[strongest][0]}:{owners[strongest][1]}"
+    asked = list(exemplar_of)
+    maybe = []
+    if len(asked) >= 2:
+        import numpy as np
+
+        centres = np.stack([matrix[merged[at][0]].mean(axis=0) for at in asked]).astype(np.float32)
+        centres /= np.maximum(np.linalg.norm(centres, axis=1, keepdims=True), 1e-9)
+        close = np.triu(centres @ centres.T, 1)
+        for i, j in zip(*np.nonzero(close >= NEAR)):
+            a, b = asked[int(i)], asked[int(j)]
+            if (a, b) in kept_apart or (merged[a][1] and merged[a][1] == merged[b][1]):
+                continue
+            maybe.append({"a": exemplar_of[a], "b": exemplar_of[b], "close": round(float(close[i, j]), 3)})
+    maybe.sort(key=lambda m: -m["close"])
+    conn.execute(
+        "INSERT OR REPLACE INTO cache (hash, kind, recipe, state, value, at)"
+        " VALUES (?, 'faces', ?, 'ready', ?, unixepoch())",
+        (GROUPS, faces.RECIPE, json.dumps({"groups": summary, "maybe": maybe[:12]})),
+    )
+    conn.commit()
+    return len(summary)
+
+
+def _summary(conn) -> dict:
+    row = conn.execute(
+        "SELECT value FROM cache WHERE kind = 'faces' AND hash = ? AND recipe = ?",
+        (GROUPS, faces.RECIPE),
+    ).fetchone()
+    if row is None:
+        return {"groups": [], "maybe": []}
+    held = row["value"]
+    loaded = json.loads(held if isinstance(held, str) else bytes(held).decode("utf-8"))
+    # The summary was a bare list before the wall asked questions.
+    return loaded if isinstance(loaded, dict) else {"groups": loaded, "maybe": []}
+
+
+def groups(conn) -> list[dict]:
+    """The summary as last written: every group worth a row, named or not."""
+
+    return _summary(conn)["groups"]
+
+
+def maybe_same(conn) -> list[dict]:
+    """Pairs of groups worth one question, nearest first."""
+
+    return _summary(conn)["maybe"]
+
+
+def keep_apart(conn, a: str, b: str, apart: bool = True) -> dict:
+    """The owner's No: these two groups are two people. Remembered against
+    the two faces, so the wall never asks about their groups again; the
+    same word taken back (`apart=False`) is the No undone, and the wall may
+    ask again."""
+
+    pair = "|".join(sorted((str(a), str(b))))
+    decisions.decide(conn, pair, APART, bool(apart))
+    conn.commit()
+    return {"apart": pair, "kept": bool(apart)}
+
+
+def name(conn, exemplar: str, called: str) -> dict:
+    """The owner introduces someone: one decision on the exemplar face.
+
+    The same *person* name on a second group is welcome: a split person
+    heals by being introduced twice, because both groups then answer to
+    the one name. Renaming goes the other way whole: every face that
+    answered to the old name takes the new one, so a healed person cannot
+    be split back apart by being renamed on one half.
+    """
+
+    called = str(called).strip()
+    if not called:
+        raise ValueError("a person needs a name")
+    if called.lower().startswith("someone"):
+        raise ValueError("that is the library's word for the unintroduced — give them their own name")
+    if ":" not in str(exemplar):
+        raise ValueError("that face is not one the groups know")
+    former = next((str(g["name"]) for g in groups(conn)
+                   if g.get("settled") and g["exemplar"] == str(exemplar)), None)
+    if former is None:
+        former = _names(conn).get(str(exemplar), ("", 0))[0] or None
+    decisions.decide(conn, str(exemplar), FAMILY, called)
+    if former and former != called:
+        for subject, (worn, _) in _names(conn).items():
+            if worn == former and subject != str(exemplar):
+                decisions.decide(conn, subject, FAMILY, called)
+    conn.commit()
+    return {"named": called}
+
+
+def last_word(conn) -> int:
+    """The log's last id: what `unname_since` winds back to."""
+
+    return int(conn.execute("SELECT COALESCE(MAX(id), 0) FROM decisions").fetchone()[0])
+
+
+def unname_since(conn, since: int, until: int | None = None) -> dict:
+    """Every word said about a face in (since, until] taken back: each such
+    face answers to what it answered to before, or to nothing. The way back
+    from a Yes, which names whole groups at once -- a rename cannot undo it,
+    because a rename moves everyone under the old name, the other side too.
+    The prior word is the one that outranked, as `_names` reads it: your own
+    over an imported one, then the latest."""
+
+    until = int(until) if until is not None else last_word(conn)
+    subjects = [str(row["subject"]) for row in conn.execute(
+        "SELECT DISTINCT subject FROM decisions WHERE family = ? AND id > ? AND id <= ?",
+        (FAMILY, int(since), until))]
+    for subject in subjects:
+        prior = conn.execute(
+            f"SELECT value FROM decisions WHERE family = ? AND subject = ? AND id <= ?"
+            f" ORDER BY {decisions.AUTHORITY_SQL} DESC, at DESC, id DESC LIMIT 1",
+            (FAMILY, subject, int(since))).fetchone()
+        decisions.decide(conn, subject, FAMILY, str(decisions.loaded(prior) or "") if prior else "")
+    conn.commit()
+    return {"unnamed": len(subjects)}
+
+
+def unname(conn, exemplar: str) -> dict:
+    """The name taken back from a face: an empty word in the log, which
+    `_names` already reads as unnamed. The way back from a first
+    introduction, whose former name was nothing."""
+
+    if ":" not in str(exemplar):
+        raise ValueError("that face is not one the groups know")
+    decisions.decide(conn, str(exemplar), FAMILY, "")
+    conn.commit()
+    return {"unnamed": str(exemplar)}

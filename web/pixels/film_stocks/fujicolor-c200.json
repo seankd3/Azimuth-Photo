@@ -1,0 +1,86 @@
+{
+  "slug": "fujicolor-c200",
+  "name": "Fujicolor C200",
+  "iso": 200,
+  "process": "C-41",
+  "type": "negative_color",
+  "white_point_hint": "daylight",
+  "white_point_kelvin": 5500,
+  "hd_curves": {
+    "r": [
+      [-2.0, 0.02],
+      [-1.2, 0.06],
+      [-0.6, 0.11],
+      [0.0, 0.15],
+      [0.6, 0.50],
+      [1.2, 0.84],
+      [1.8, 1.15],
+      [2.6, 1.41]
+    ],
+    "g": [
+      [-2.0, 0.02],
+      [-1.2, 0.06],
+      [-0.6, 0.11],
+      [0.0, 0.15],
+      [0.6, 0.51],
+      [1.2, 0.86],
+      [1.8, 1.17],
+      [2.6, 1.43]
+    ],
+    "b": [
+      [-2.0, 0.02],
+      [-1.2, 0.05],
+      [-0.6, 0.10],
+      [0.0, 0.15],
+      [0.6, 0.50],
+      [1.2, 0.85],
+      [1.8, 1.16],
+      [2.6, 1.42]
+    ]
+  },
+  "spectral_crosstalk": [
+    [0.83, 0.13, 0.04],
+    [0.08, 0.81, 0.11],
+    [0.03, 0.17, 0.80]
+  ],
+  "dir_coupler": [
+    [1.0, -0.07, -0.05],
+    [-0.06, 1.0, -0.08],
+    [-0.04, -0.07, 1.0]
+  ],
+  "grain": {
+    "rms_granularity": 5.0,
+    "size_px_at_4k": 2.2,
+    "shadow_bias": 0.7,
+    "r": {
+      "rms_granularity": 5.0,
+      "size_px_at_4k": 2.2,
+      "shadow_bias": 0.7
+    },
+    "g": {
+      "rms_granularity": 5.0,
+      "size_px_at_4k": 2.2,
+      "shadow_bias": 0.7
+    },
+    "b": {
+      "rms_granularity": 5.0,
+      "size_px_at_4k": 2.2,
+      "shadow_bias": 0.7
+    }
+  },
+  "halation": {
+    "amount": 0.05,
+    "threshold": 0.62,
+    "radius_frac": 0.025,
+    "green_fraction": 0.08
+  },
+  "base": {
+    "orange_mask_rgb": [0.90, 0.53, 0.26],
+    "base_fog_density": 0.10
+  },
+  "print_paper": {
+    "gamma": 2.55,
+    "shoulder": 0.83
+  },
+  "notes": "H&D approx from memory of Fujifilm Fujicolor C200 technical data; straight-line gamma ~0.60 with the green layer slightly steeper than red - the Fuji consumer cool/green bias (shared family shape with the Superia X-TRA 400 file, a touch cleaner and lower contrast). ESTIMATED: spectral crosstalk (Superia-family G-B overlap and cyan-leaning blue), modest consumer DIR, halation, cooler-than-Kodak orange mask, print paper. rms_granularity 5.0 is an ESTIMATE (C200 is visibly finer than Superia X-TRA 400's ~5.2 at slower speed; Fuji publishes granularity sparsely). Grain pitch/shadow_bias engine-derived; grain keys flattened for the engine. 'Fuji 200' lab scans exist under /mnt/expansion/Photos/Film Scans (README inventory, likely C200) - untuned so far, candidate for a scan-tuning pass. 2026-07-11"
+}

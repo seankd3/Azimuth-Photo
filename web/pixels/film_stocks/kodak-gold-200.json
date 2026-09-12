@@ -1,0 +1,203 @@
+{
+  "slug": "kodak-gold-200",
+  "name": "Kodak Gold 200",
+  "iso": 200,
+  "process": "C-41",
+  "type": "negative_color",
+  "white_point_hint": "daylight",
+  "white_point_kelvin": 5500,
+  "hd_curves": {
+    "r": [
+      [
+        -2.0,
+        0.02
+      ],
+      [
+        -1.2,
+        0.05
+      ],
+      [
+        -0.6,
+        0.1
+      ],
+      [
+        0.0,
+        0.15
+      ],
+      [
+        0.6,
+        0.5
+      ],
+      [
+        1.2,
+        0.86
+      ],
+      [
+        1.8,
+        1.16
+      ],
+      [
+        2.6,
+        1.38
+      ]
+    ],
+    "g": [
+      [
+        -2.0,
+        0.01
+      ],
+      [
+        -1.2,
+        0.05
+      ],
+      [
+        -0.6,
+        0.1
+      ],
+      [
+        0.0,
+        0.15
+      ],
+      [
+        0.6,
+        0.49
+      ],
+      [
+        1.2,
+        0.84
+      ],
+      [
+        1.8,
+        1.14
+      ],
+      [
+        2.6,
+        1.36
+      ]
+    ],
+    "b": [
+      [
+        -2.0,
+        0.01
+      ],
+      [
+        -1.2,
+        0.04
+      ],
+      [
+        -0.6,
+        0.09
+      ],
+      [
+        0.0,
+        0.15
+      ],
+      [
+        0.6,
+        0.47
+      ],
+      [
+        1.2,
+        0.81
+      ],
+      [
+        1.8,
+        1.1
+      ],
+      [
+        2.6,
+        1.32
+      ]
+    ]
+  },
+  "spectral_crosstalk": [
+    [
+      0.84,
+      0.13,
+      0.03
+    ],
+    [
+      0.09,
+      0.8,
+      0.11
+    ],
+    [
+      0.03,
+      0.16,
+      0.81
+    ]
+  ],
+  "dir_coupler": [
+    [
+      1.0,
+      -0.06,
+      -0.04
+    ],
+    [
+      -0.05,
+      1.0,
+      -0.06
+    ],
+    [
+      -0.04,
+      -0.05,
+      1.0
+    ]
+  ],
+  "grain": {
+    "rms_granularity": 5.5,
+    "size_px_at_4k": 2.5,
+    "shadow_bias": 0.72,
+    "r": {
+      "rms_granularity": 5.5,
+      "size_px_at_4k": 2.5,
+      "shadow_bias": 0.72
+    },
+    "g": {
+      "rms_granularity": 5.5,
+      "size_px_at_4k": 2.5,
+      "shadow_bias": 0.72
+    },
+    "b": {
+      "rms_granularity": 5.5,
+      "size_px_at_4k": 2.5,
+      "shadow_bias": 0.72
+    }
+  },
+  "halation": {
+    "amount": 0.06,
+    "threshold": 0.62,
+    "radius_frac": 0.028,
+    "green_fraction": 0.09
+  },
+  "base": {
+    "orange_mask_rgb": [
+      0.95,
+      0.56,
+      0.24
+    ],
+    "base_fog_density": 0.11
+  },
+  "print_paper": {
+    "gamma": 2.52,
+    "shoulder": 0.82
+  },
+  "notes": "H&D approx from Kodak Gold 200 consumer datasheet Status M curves. Warm bias encoded partly via slightly higher red-layer density build and warmer orange mask; straight-line gamma \u2248 0.58. Spectral crosstalk from consumer Gold sensitivity plots \u2014 broader overlap than Portra (less layer isolation). Weak consumer DIR. Diffuse RMS Granularity ~5\u20136 (Kodak consumer Gold family; exact published figure varies by generation \u2014 using 5.5 as midpoint). Halation subtle. Memory approximation; Gold datasheets are thinner than Portra pubs. | tuned against 15 real San Marcos Filmlab Gold 200 scans 2026-07-10",
+  "scan_matrix": [
+    [
+      1.04,
+      -0.01,
+      -0.02
+    ],
+    [
+      -0.01,
+      1.0,
+      0.005
+    ],
+    [
+      -0.025,
+      0.01,
+      0.97
+    ]
+  ]
+}

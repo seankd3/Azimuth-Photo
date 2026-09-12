@@ -1,0 +1,8 @@
+Pillow==12.3.0
+rawpy==0.27.0
+pywebview==6.2.1
+pyinstaller==6.22.2
+# People: face detection + ArcFace identity, CPU on purpose — the card
+# belongs to SigLIP. Weights arrive via faces.fetch(), never by surprise.
+insightface==1.0.1
+onnxruntime==1.29.0

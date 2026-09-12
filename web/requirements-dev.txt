@@ -1,0 +1,7 @@
+# Test/lint-only dependencies (not imported by the product).
+# Install into web/.venv beside requirements-v2.txt.
+pytest>=8
+pytest-timeout>=2.3
+ruff>=0.8
+# scripts/gates/names.py runs it: a name that is called is a name that exists.
+pyflakes>=3.2

@@ -1,0 +1,10 @@
+# Measured 2026-09-08 on the tree with the V1 application deleted. One number
+# per gate -- see docs/GATES.md. It falls by measurement (`check.py --write`)
+# and rises only by hand, in its own commit. A number that is not the
+# measurement describes a tree that is not there.
+layers 0
+tables 0
+paths 0
+names 0
+collects 0
+imports 0

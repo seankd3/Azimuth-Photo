@@ -1,0 +1,203 @@
+{
+  "slug": "fuji-superia-xtra-400",
+  "name": "Fuji Superia X-TRA 400",
+  "iso": 400,
+  "process": "C-41",
+  "type": "negative_color",
+  "white_point_hint": "daylight",
+  "white_point_kelvin": 5500,
+  "hd_curves": {
+    "r": [
+      [
+        -2.0,
+        0.01
+      ],
+      [
+        -1.2,
+        0.05
+      ],
+      [
+        -0.6,
+        0.1
+      ],
+      [
+        0.0,
+        0.15
+      ],
+      [
+        0.6,
+        0.5
+      ],
+      [
+        1.2,
+        0.86
+      ],
+      [
+        1.8,
+        1.16
+      ],
+      [
+        2.6,
+        1.39
+      ]
+    ],
+    "g": [
+      [
+        -2.0,
+        0.01
+      ],
+      [
+        -1.2,
+        0.05
+      ],
+      [
+        -0.6,
+        0.11
+      ],
+      [
+        0.0,
+        0.15
+      ],
+      [
+        0.6,
+        0.52
+      ],
+      [
+        1.2,
+        0.88
+      ],
+      [
+        1.8,
+        1.18
+      ],
+      [
+        2.6,
+        1.41
+      ]
+    ],
+    "b": [
+      [
+        -2.0,
+        0.01
+      ],
+      [
+        -1.2,
+        0.04
+      ],
+      [
+        -0.6,
+        0.09
+      ],
+      [
+        0.0,
+        0.15
+      ],
+      [
+        0.6,
+        0.48
+      ],
+      [
+        1.2,
+        0.83
+      ],
+      [
+        1.8,
+        1.12
+      ],
+      [
+        2.6,
+        1.35
+      ]
+    ]
+  },
+  "spectral_crosstalk": [
+    [
+      0.83,
+      0.13,
+      0.04
+    ],
+    [
+      0.08,
+      0.81,
+      0.11
+    ],
+    [
+      0.03,
+      0.17,
+      0.8
+    ]
+  ],
+  "dir_coupler": [
+    [
+      1.0,
+      -0.07,
+      -0.05
+    ],
+    [
+      -0.06,
+      1.0,
+      -0.08
+    ],
+    [
+      -0.04,
+      -0.07,
+      1.0
+    ]
+  ],
+  "grain": {
+    "rms_granularity": 5.2,
+    "size_px_at_4k": 2.4,
+    "shadow_bias": 0.7,
+    "r": {
+      "rms_granularity": 5.2,
+      "size_px_at_4k": 2.4,
+      "shadow_bias": 0.7
+    },
+    "g": {
+      "rms_granularity": 5.2,
+      "size_px_at_4k": 2.4,
+      "shadow_bias": 0.7
+    },
+    "b": {
+      "rms_granularity": 5.2,
+      "size_px_at_4k": 2.4,
+      "shadow_bias": 0.7
+    }
+  },
+  "halation": {
+    "amount": 0.05,
+    "threshold": 0.64,
+    "radius_frac": 0.028,
+    "green_fraction": 0.1
+  },
+  "base": {
+    "orange_mask_rgb": [
+      0.9,
+      0.54,
+      0.26
+    ],
+    "base_fog_density": 0.1
+  },
+  "print_paper": {
+    "gamma": 2.55,
+    "shoulder": 0.82
+  },
+  "notes": "H&D approx from Fujifilm Superia X-TRA 400 datasheet characteristic curves (Fuji Status M equivalents). Green layer slightly steeper (Superia's cool/green bias); straight-line gamma \u2248 0.59 (G \u2248 0.60). Spectral crosstalk from Superia spectral sensitivity plots \u2014 notable G\u2194B overlap and cyan-leaning blue response vs Kodak Portra. Consumer-strength DIR (weaker than Portra/Ektar). RMS granularity ~5 (Fuji publishes RMS for Superia family in this range; exact X-TRA 400 figure approximated). Halation subtle. Memory approximation of Fuji published plots. | tuned against 15 real San Marcos Filmlab Fuji 400 scans (nearest Superia X-TRA proxy) 2026-07-10",
+  "scan_matrix": [
+    [
+      0.985,
+      0.01,
+      0.0
+    ],
+    [
+      -0.01,
+      1.03,
+      -0.01
+    ],
+    [
+      0.0,
+      0.015,
+      1.02
+    ]
+  ]
+}

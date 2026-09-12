@@ -1,0 +1,1046 @@
+# Azimuth 2.0 — the core
+
+**Status (09-09):** the rewrite is `main`. The V1 application left the tree
+on 09-08; the ledger (`REWRITE_LEDGER.md`) reads Proven or Removed for every
+file, the six gates read 0, and the owner's working library runs on it. The
+numbers in the sections below are the measurements that shaped the design,
+dated where they were taken; `development.md` has the tree as it is.
+
+Rebuilt on the core and their machinery deleted, each verified in the running
+app: tiles and media, the grid and library queries, search, comparisons and
+Elo propagation, the mosaic, import, faces, captions, the boot warmers, the
+ranking repository, the people stack, and the phone's web surface.
+
+**Version:** 1.0.0-rc.1 → 2.0.0-dev.
+**Method (08-16):** gut it and rebuild from first principles. Surfaces are not
+adapted, wrapped or threaded through — they are rewritten on the core and their
+old machinery is deleted in the same commit.
+**This document owns the core invariants.** If a change needs a special case to
+fit them, the shape is wrong — fix the shape, not the caller. Product decisions
+live in `MASTER_PLAN.md`, code layering in `ARCHITECTURE.md`, and current rewrite
+order in `product-roadmap.md`.
+
+---
+
+## Why
+
+**Azimuth does not work well and nobody uses it daily.** That is the owner's
+own correction (08-16) to the sentence this document used to open with, and it
+changes what the rewrite owes: there is no working daily-driver to protect, so
+no commit has to keep the old app runnable, no old surface is owed a migration,
+and *current behaviour is not evidence that a shape is right*. A thing that
+never worked well is not a requirement.
+
+What is true is the size: **146,178 lines**, 24% of its 2,203 commit subjects
+repair-shaped, and simple changes take days. Those two facts are the same fact.
+
+So 2.0 is a rebuild from first principles on a core small enough to hold in your
+head. What carries forward is the **appendix** — lessons already paid for — and
+nothing else. Where a lesson and an old implementation disagree, keep the lesson
+and write the code new.
+
+HTML and CSS remain the right rendering tools; the inherited 39k-line browser
+application does not. V2 rebuilds each desktop surface on the small serverless
+UI boundary, carries forward only demonstrated interaction lessons, and deletes
+the old surface as its jobs are replaced. Native widgets are not the objective;
+one polished native-window product without inherited application machinery is.
+
+### The measurement that settles the argument
+
+Counted on the live catalog, 2026-08-16. It is **2.4 GB across 84 tables**, and
+**41 of those tables are empty**. Of everything in the other 43, this is all the
+owner ever decided:
+
+| | |
+|---|---|
+| develop settings | 79,487 |
+| stars | 6,165 |
+| comparison pairs | 2,532 |
+| develop presets | 994 |
+| quality marks | 89 |
+| keywords | 77 |
+| flags | 32 |
+| trashings | 2 |
+| **total** | **≈ 89,378 rows** |
+
+Everything else — every index, backlog, ledger, cursor, scan state, FTS shadow,
+presence table and derived column — is a machine's opinion about bytes it can
+read again. **The irreplaceable part of Azimuth fits in one append-only table**,
+and it is 0.06% of the rows in the catalog holding it. That is the whole case
+for the shape of this rewrite, and it is why "smaller" and "safer" are the same
+direction here rather than opposite ones.
+
+---
+
+## The contract
+
+Azimuth knows four things about a photo:
+
+1. **What it is** — its bytes.
+2. **Where copies are** — which drives have it.
+3. **What you decided** — keeps, stars, edits, names.
+4. **What we computed** — thumbnails, dates, embeddings, captions.
+
+Three rules:
+
+- **Only #3 is irreplaceable.** Everything else rebuilds from scratch — so the
+  decisions log is written to every record drive and a sweep checks it is there.
+- **#2 is a guess, checked when it matters.** A read never consults `copies`,
+  `drives` or the cache; a photo with no known copy still browses and still ranks.
+- **The machine never deletes the last copy. Only you do.**
+
+---
+
+## Five tables
+
+```sql
+drives    (id, uuid, root, is_record)
+images    (id, content_hash, version_of, tail, elo, <your decisions>, <computed memo>)
+copies    (photo_id, drive_id, tail NULL, seen_at)
+decisions (subject, family, value, at)
+cache     (hash, kind, recipe, state, path NULL, value NULL, bytes)
+```
+
+> **An absolute path is a drive plus a tail, and we stored them fused.**
+
+That fusion caused the drive-probing, `hub_remote`, `missing_at`, the
+mass-missing breaker and `rebind_moved_source` — each one trying to recover a
+tail from a path that swallowed its drive. **Store the tail, compute the path.**
+A renamed root is one row; a new drive letter is one row; the same tail on two
+drives *is* the two-tier model, with nothing to reconcile.
+
+**drives** — identity is a uuid in a marker file inside the root, never a letter.
+`is_record` is the only policy bit in the design: *may this drive be the last
+copy?* The archive may; the working disk may not. From that one bit: reads prefer
+the working disk, backup copies to the record, reclaim only deletes from the
+working disk.
+
+**photos** — one row per photograph. `tail` is a memo so folder browsing stays
+fast. `id` is a handle, because 31 tables and every API URL use integers.
+`copies.tail` is NULL unless that copy sits somewhere else, which happens: 5,460
+rows carry a `-N` collision suffix.
+
+**version_of** — one nullable column covering raws, exports and virtual copies. A
+group is an original plus everything whose chain reaches it, so exporting an
+export lands in one group rather than a chain of pairs. The link is *read, not
+guessed* — Lightroom stamps `crs:RawFileName` and `xmpMM:OriginalDocumentID` into
+every export. Bursts are a different axis and stay out of scope: `stacks` holds
+0 rows.
+
+> **`version_of` is a NEW column. It never renames `vc_of`.** `vc_of` does not
+> mean "version of" — it means **"this row does not own a file."** Verified:
+> `idx_images_original_filepath` is `UNIQUE(filepath) WHERE vc_of IS NULL`, and
+> the foreign key is `vc_of → images.id ON DELETE CASCADE`. An export owns a real
+> file, so putting it in `vc_of` would drop it out of the uniqueness index and
+> cascade-delete it with its parent. `version_of` is nullable with
+> `ON DELETE SET NULL`, and `vc_of` keeps its own meaning until virtual copies
+> are rebuilt on top of it.
+
+**cache** — `path` names a rendition on disk, `value` holds a computed fact.
+42,937 embeddings read as one matrix, not 42,937 file opens that reclaim would
+mistake for previews.
+
+---
+
+## Seven functions
+
+```
+identify(file)             what photo is this
+open(photo)                give me the file    (first drive that has it, working disk first)
+put(file, drive, tail)     write it, then identify + saw
+saw(photo, drive)          record a copy       (a hint)
+make(photo, kind, recipe)  thumbnail / preview / embedding
+decide(subject, what)      record a decision   (append to the log)
+sweep(drive)               check what's on a drive
+```
+
+Four rules make them honest:
+
+- **`decide()` takes any stable identity** — a photo's hash, a folder's tail, a
+  drive's uuid, a person's name. This kills the all-zeros fake content hash
+  collections invented to fit, and seven side tables with it.
+- **The machine's read of a file is cache. Your save is a decision. The decision
+  wins.** Decision columns on `photos` are an index rebuilt from the log.
+- **`recipe` is an argument and a pure function of its inputs — never a
+  timestamp.** Feeding `updated_at` in means reset-then-redo re-renders identical
+  pixels and two machines never share a cache entry.
+- **The hash reads every byte and gives content a stable identity.** It still
+  never authorizes deletion or silently merges rows carrying decisions. A
+  deletion compares the two byte streams at the moment it acts.
+
+**One walker owns admission**: `.trash/`, `Astrophotography/` (case-blind, on the
+resolved path), junk directories, dotfiles, `.lrdata`, zero-length files and
+in-flight `.importing`/`.moving` partials. Without `.trash/` in that list, "a new
+tail with a known hash gets a copy row" silently un-trashes every photo you ever
+threw away.
+
+**The marker file is the gate.** A copy row is retired only by a failed read on a
+drive whose marker is readable; a sweep that cannot read the marker changes
+nothing.
+
+---
+
+## Around the core
+
+```
+core       the four facts, seven functions
+work       one query, one worker — everything computed gets made here
+features   queries over the facts, plus the decisions they write
+ui         renders queries, calls verbs
+```
+
+### The whole backend, as files
+
+Not a diagram — the target tree as it was written on 08-16, with a line
+budget per file. A surface that will not fit its budget is a surface whose
+shape is still wrong, and that is the useful thing about writing the numbers
+down before the code. The tree that exists is in `development.md`: `app.py`
+never came (the seven functions are the API, and `desktop.py` is the edge),
+`develop/` became `pixels/` plus `develop.py`, `importer.py` became
+`model/intake.py`, and `ai.py` became the cache kinds `embed.py`,
+`faces.py` and `photostats.py`.
+
+| | Lines | What it is |
+|---|---|---|
+| `model/` | 900 | drives · photos · copies · decisions · cache · backup · schema.sql |
+| `work.py` | 200 | owed is a query; one worker; the politeness gate |
+| `render.py` | 400 | decode + edits → pixels, at three sizes, for everyone |
+| `develop/` | 3,500 | the colour mathematics, and nothing else |
+| `library.py` | 400 | the queries the grid reads: folders, filters, counts |
+| `rank.py` | 300 | comparisons → Elo → propagation through the vectors |
+| `search.py` | 250 | one query, ranked fusion, degrades never blocks |
+| `importer.py` | 300 | identify + put, over one pure (date, kind, roll) → tail |
+| `ai.py` | 400 | embeddings, captions, faces — registered as cache kinds |
+| `app.py` | 600 | routes, thin |
+| `boot.py` | 150 | open the catalog, answer one query, paint |
+| **total** | **≈ 7,400** | against 107k today |
+
+Two things this table asserts, and both are load-bearing:
+
+**Develop is 47% of the backend, and that is correct.** It is the only surface
+whose bulk is irreducible mathematics — tone curves, colour matrices,
+highlight reconstruction, guided filter, noise profiles, lens corrections —
+fitted against real acceptance data and expensive to be wrong about. Everything
+around it (caches, schedulers, history tables, proof tiles, progressive UI) is
+plumbing that the core already provides. The maths survives verbatim; the
+plumbing dies.
+
+**Nothing in this tree is a subsystem.** There is no `services/`, no
+`repositories/`, no `managers/`, no `coordinators/`. A file here is a set of
+queries over the five tables plus the decisions it writes, and when one starts
+wanting a table of its own it has found either a decision family or a cache
+kind — never a new noun.
+
+**A feature may not own a table.** If it thinks it needs one, it is either a
+decision family or a cache kind. Mechanically checkable: no `CREATE TABLE`
+outside `model/schema.sql`.
+
+**Work — one query, one worker.** Owed = *what should exist* minus *what is
+cached*: an anti-join, not a queue. New photos are not special; they sort first
+because they are newest. Order is closeness to your eyes — on screen now, then
+the rest of this view, then newest, then oldest debt. One owned worker does one
+bounded item at a time on its own connection; a caller may yield before an item
+for an explicit product reason such as battery saver. One immutable capability
+per kind says how to compute it, what it costs, whether this machine can do it,
+and whether it is evictable. Boot passes the capabilities it owns explicitly;
+import order is never product configuration. Failures record *why* once instead
+of being rediscovered every pass.
+
+**Cache and thumbnails.** A tile is a cached answer to *what do these photo bytes
+look like at this size and rotation*. An edit is not a recipe parameter until
+the renderer really applies it; otherwise two different questions would cache
+the same pixels. Eviction is by age against one ceiling, never touching
+originals or never-evict kinds. Painting a smaller tile while the right one
+renders is UI behaviour, not a cache concept.
+
+**Embedded metadata.** Dimensions, capture date, camera, and lens are one
+cached answer keyed by complete content identity. Ready answers project into
+the `images` columns used for sorting and facets; boot can rebuild those query
+indexes from cache. Folder names, mtimes, JSON companions, and XMP are excluded
+from this answer because they can change without changing the keyed bytes.
+Your corrected capture date is a decision and overrides the embedded read.
+
+**Collections and keywords.** Both are named sets of photo identities recorded
+as decisions; they differ only in where the desktop presents them. Renaming a
+set never moves its membership. Saved views wait for a real typed query
+language—V2 does not store an opaque query payload that nothing can execute.
+
+**Ranking.** You make comparisons; everything else is computed from them. A
+comparison is a decision, Elo and taste are derivations, the mosaic is a
+candidate query. One sort registry — a sort not in it is rejected, never
+silently falling back to Elo.
+
+> **Correction (08-16).** An earlier draft called the `elo`/`comparisons`
+> columns irreplaceable because "the pair ledger was never replicated". Measured
+> against the live catalog, the opposite is true, and the real numbers are the
+> best argument this design has:
+
+| | Rows | What it is |
+|---|---|---|
+| `comparisons` table | **2,532 pairs over 665 photos** | the owner's actual judgement |
+| `images.comparisons` counter | 415,360 across 21,376 photos | fiction — **20,811 of those photos appear in no pair at all**, and the counts cluster at 10–14, which is a machine's wave, not a person clicking |
+| `images.elo` | 29,845 moved off the 1200 default | of which only 585 are in the ledger — the other 29,260 are **propagated**, see below |
+| `images.stars` | 6,165 | judgement |
+| `images.flag` | 32 | judgement |
+
+The ledger exists and *is* the record. The columns are derivations written into
+the same place as the judgement, which is precisely the failure this design
+refuses with **the machine's read is cache, your save is a decision**.
+
+> **Propagation is the point, not the pollution.** Those 29,260 Elos are the
+> taste model spreading real comparisons through the embedding space to
+> photographs that *look like* the ones you judged. It is the mechanism that
+> multiplies ranking power — it is why 2,532 comparisons can order 157,000
+> photos, and it is a feature, not drift.
+
+That makes the shape better rather than worse. Elo is **derived from
+comparisons *and* vectors**, so it is a cache kind whose answer improves every
+time either input grows: one more comparison, or one more embedding off the
+owed queue, re-ranks everything that resembles it. Recomputing is a feature.
+Storing it as if it were judgement is what stopped it improving.
+
+Two consequences worth stating plainly:
+
+- **Embeddings are load-bearing for ranking, not only for search.** The ~131k
+  owed vectors are not a nice-to-have; each one is a photograph that cannot yet
+  receive propagated taste.
+- **The owner's ranking judgement is 8,729 rows** — 2,532 pairs, 6,165 stars,
+  32 flags. That is all that must survive. Everything the ranking engine
+  produces from it can be made again, and should be.
+
+**AI.** Cache, with two riders: never evict (small, hours to remake), and your
+answer about the machine's answer — a name, "not a face", a fixed caption — is a
+decision stored elsewhere. Never a precondition: ranking and culling work at zero
+coverage and sharpen as results land.
+
+**Import.** `identify` + `put`, over one pure function: (date, kind, roll) → tail.
+
+**Search.** One query with ranked fusion — filename, keyword and EXIF always;
+embeddings when they exist. Degrades, never blocks, never says "not enough
+photos".
+
+**Develop.** Edits are decisions; decode and render are cache; one function at
+three sizes serves grid, Develop and export, which is what stops them
+disagreeing. Edit history *is* the decisions log filtered to one photo, so
+`develop_history` goes.
+
+---
+
+## Boot
+
+> **Boot is: open the catalog, answer one query, paint.**
+
+Nothing the grid needs depends on a drive being attached. The app opens instantly
+**by construction**, not by optimisation, and library size and drive state stop
+mattering. Everything else — sweeping, hashing, thumbnailing, embeddings,
+integrity — is owed work that starts after the first paint and yields to you.
+
+Every boot wound was the same mistake, something correct-but-expensive placed
+before the first paint: a search index one row out of step cost **12.3 s per
+launch**; `PRAGMA quick_check` cost ~1 s/GB and blocked boot **~64 s**; warmers
+firing at the port opening made a 150k library serve its first thumbnail in
+**5–50 s**; a table-scanning `UPDATE` inside a lazy connect froze boot for **30 s**.
+
+Integrity moves behind the paint — after an unclean shutdown it runs in the
+background and a failure becomes a plain offer to restore from backup. Shutdown
+keeps its order: stop everything database-touching *first*, then release handles,
+or Windows keeps the library file. **The gate:** a boot test that fails when
+first paint exceeds its budget on a 150k-row catalog.
+
+---
+
+## What you see when something is wrong
+
+Five words, each with exactly one action.
+
+| Word | Means | You |
+|---|---|---|
+| *(nothing)* | fine | — |
+| **preparing** | the tile isn't made yet | wait — a smaller tile paints meanwhile |
+| **away** | its drive isn't attached | plug the drive in |
+| **lost** | no copy answers anywhere | restore it, or forget it |
+| **unreadable** | the file is there and won't decode | replace the file |
+
+Today there are nine, several unreachable. These are computed at read time, never
+stored — and one sentence does the work the entire mass-missing apparatus was
+built for:
+
+> **A photo can only be *lost* if every drive that could hold it is attached and
+> none of them has it.**
+
+So with the archive unplugged, nothing can ever be declared missing. More correct
+than a 5% ratio, no threshold, no override switch, and it cannot be defeated by
+an interrupted scan. **`preparing` is not an error and must never look like one.**
+
+### Trash is a decision; Empty Trash is deletion
+
+Putting a photograph in Trash appends `status = trashed` for its content
+identity and updates the browse projection. It moves no bytes. Restore repeats
+the status that preceded Trash; Undo repeats the exact answer replaced by one
+action and refuses if a newer decision has intervened.
+
+Empty Trash is the separate irreversible boundary. Its typed count must still
+match, every registered drive must be attached, missing copy hints are repaired
+by inspecting each canonical drive address, every path must be a regular file,
+and all copies are compared byte-for-byte. Working copies leave first and the
+record copy last. Each successful unlink is committed immediately, so an
+interruption reports honest remaining work and preserves the safest remaining
+copy instead of rolling catalog truth back over a deletion that already
+happened.
+
+---
+
+## Helpers
+
+**A share is a drive.** `\\192.168.1.72\Expansion\Photos` instead of `E:\Photos`
+— same marker, same uuid. `open()` still prefers the local copy. A server that is
+off is a drive that is unplugged, already a first-class state.
+
+**A helper is another machine doing owed work.** Owed is a query, so a helper
+needs no protocol: it runs the same worker against the same shared drive and
+writes results where this machine already looks; `sweep()` finds them. No HTTP
+client, no pairing, no discovery, no mirror, no API revision.
+
+> **This machine never waits for a helper. A helper's absence is
+> indistinguishable from a slow day.**
+
+That is the entire difference from the hub design this replaces, which made the
+laptop *depend* on the server — fifteen "is it reachable" branches are still in
+the tree. Two hard lines: **the catalog never lives on a share** (SQLite over SMB
+corrupts), and **nobody ever asks a helper a question and waits.** The first
+synchronous call is the hub coming back.
+
+Embedding coverage is deliberately outside the critical path for the rewrite.
+The laptop may fill owed derivatives over time, but incomplete AI work must not
+delay the core, browsing, storage, safety, or product-polish work.
+
+---
+
+## The shape: a desktop app, not a server
+
+One person, one machine. Everything that exists because the app was reachable
+over a network is deleted: owner auth, the unlock page, device tokens,
+browser-origin and rebinding checks, CORS, remote access, Tailscale serving,
+pairing. **The seven functions are the API**; HTTP is a transport and it goes
+too. The phone is parked — the Android client was deleted on 09-08, and comes
+back only when a transport is deliberately rebuilt.
+
+---
+
+## Build order
+
+**The order changed on 08-16** and it is worth saying why. The original eleven
+steps were a *migration*: each one moved the live app from an old shape to a new
+one without breaking it. Once the owner said the app never worked well and he
+does not use it, migration stopped being the job. What is left is far simpler —
+finish the core, then rebuild each surface on it and delete what it replaces.
+
+### Part one — the core. Done.
+
+| | Landed |
+|---|---|
+| `drives` + marker uuids | `69cf6d76` |
+| every photo has a tail | `bcc747b1` |
+| `open()` replaces path probing | `d908b32f` |
+| `copies` + a sweep that refuses rather than guesses | `210789b6` |
+| the phantom purge, and both drives swept | `d05c7c9e` · `ce1d3052` |
+| `decide()` — the log | `e03c628a` |
+| `make()` — one cache for every computed answer | `e03c628a` |
+| `identify()`, `put()`, `reclaim()` | `5265300c` |
+| owed is a query, one worker | `1bfa9ad1` |
+| 88,379 judgements adopted into the log | `d1e39c5f` |
+| ranking as two pure functions | `2fd8ab16` |
+
+### Part two — the surfaces. Each lands whole, on the core, and deletes its own machinery.
+
+| Surface | Replaces | Done when |
+|---|---|---|
+| `render.py` | `thumbnails/` (9,157) + `features/media/` (703) | one function answers grid, Develop and export, so they cannot disagree |
+| `library.py` | `features/library/` + `features/catalog/` + four repositories | the grid paints from one query with no path in it |
+| `rank.py` **done** | `elo_propagation.py`, `rankings.py`, `ratings.py`, `features/compare/` | ranking recomputes from 2,532 pairs and improves as embeddings land |
+| `importer.py` | `features/imports/`, `scanner.py`, `synchronize.py` | a card imports through `identify` + `put` and one pure tail rule |
+| `search.py` + `ai.py` | `features/search/`, `people/`, `captions/`, `ai/`, `embed_cache.py` | one ranked fusion; embeddings are a never-evict cache kind |
+| `develop/` | `features/develop/` minus its plumbing | the colour maths survives; the schedulers, history table and proof tiles do not |
+| `app.py` + `boot.py` | `app.py`, `core/`, `features/system/`, `data/schema.py` | boot is: open the catalog, answer one query, paint |
+| *(nothing)* **done** | the hub residue, the network layer, `features/sync/` | no port reachable from outside, no pairing, no oplog |
+
+**`features/sync/` is gone (08-16), and it is the cleanest illustration of the
+whole method.** 2,770 lines, of which the 997-line operation log was the heart:
+a device id, a per-origin sequence number, a last-write-wins comparison per
+family, a pending queue with retries, and an apply pipeline that read each
+entry back and wrote it onto the catalog.
+
+Every one of that log's fourteen call sites had the same shape — the caller
+wrote its own table, committed, *then* recorded the entry, whose apply step
+looked the photograph back up by content hash and set the same column a second
+time. The machinery resolved conflicts between devices that no longer exist.
+`features/trash/service.py` carried the epitaph in a comment: *"a satellite's
+trash was reverted by the hub's copy of the row on the next mirror refresh"* —
+a true description of a real bug, in a hub that has been deleted.
+
+What replaced it is `judgements.py`, which records the same seven verbs in the
+log and does nothing else. Two things fell out rather than being built:
+
+* **The all-zeros content hash is gone.** A collection had to be *some*
+  photograph to be decided about, so the old log invented one. `decisions`
+  takes any stable identity, so a collection is decided about by its uuid.
+* **Deleting a collection stopped needing a captured payload.** The old route
+  read the state, deleted the row, then replayed the state with `deleted:
+  true`. The `FORGET` family already existed and was never used; a uuid
+  outlives its row, so the judgement can simply be made after the fact.
+
+Also found and fixed while doing it: one undefined name in the shared test
+fixture — `_tce._clear_disk_index()`, a disk index belonging to the deleted
+thumbnail cache — was failing **201 tests** with a bare `NameError`. The suite
+is the instrument for the remaining surface deletions, so it had to work first.
+
+**The only ordering constraint left.** `render.py` before the surfaces that read
+pixels, because the Develop base keyed on `(image_id, source_path)` and the
+thumbnail ETag folded in `filepath` — 143,803 of 144,473 cache rows belong to
+the archive, and re-keying onto the hash is what stops a re-decode wave the
+first time the archive is plugged in warm. Everything else may land in any
+order, which is itself a result of the core: surfaces no longer share state, so
+they no longer share a schedule.
+
+*(The migration steps that stood here — purging 17,132 phantom rows, the
+cold backup, the guard rails around the first scan — were carried out on
+08-15 and 08-16 and are recorded in `archive/SIMPLIFY_LOG.md`.)*
+
+---
+
+## Duplicate cleanup, when it is built
+
+There is no duplicate-cleanup surface yet; a stack today is a run of frames
+at one cadence (`web/stacks.py`). When byte-identical cleanup is built, the
+contract is fixed here so no surface can weaken it: the fast identity (head
+digest plus size) only nominates candidates; every candidate is read whole
+and the full digests compared; each file's device, inode, size and modified
+time must hold still across the check and be rechecked immediately before
+anything moves; the oldest filesystem-modified file is kept, ties to the
+earliest catalog record and then the lowest id; a group with an away drive, a
+changed file or disagreeing digests is deferred, never partly done; and the
+redundant copies go to Trash, whose restore is the undo. The result reads as
+a plain plan: groups verified, copies removable, bytes recoverable, exceptions
+deferred.
+
+## The surfaces that serve nothing
+
+Measured on the live catalog, 2026-08-16. Every one of these tables holds
+**zero rows**, and has for as long as anyone has looked:
+
+| Table | Rows | Backed by |
+|---|---|---|
+| `collections`, `collection_images`, `collection_links` | 0 | `features/collections/` (2,148) |
+| `saved_views` | 0 | `features/library/saved_views.py` |
+| `stacks`, `stack_members` | 0 | `features/stacks/` (1,249) + `repositories/stacks.py` (682) |
+| `people`, `person_image_membership` | 0 | `features/people/` (312) + `repositories/people.py` (1,075) + schema + clustering (293) |
+| `image_captions` | 0 | `features/captions/` (188) + `repositories/captions.py` (567) |
+| `face_detections` | 0 | the 93,220-row backlog and its six triggers |
+
+**About 6,500 lines of backend serve zero rows between them.** That is not a
+feature that is unused; it is a feature that was never finished, kept alive by
+its own routes and its own tests. The owner's whole judgement is 88,690
+decisions and none of it is here.
+
+The implication for the rewrite is that the remaining third is smaller than a
+line count suggests. These surfaces do not need rebuilding on the core — they
+need their routes reduced to the empty answers they already give, and their
+machinery deleted. Only the UI's expectations are load-bearing, and the UI is
+already rendering nothing for all of them.
+
+**Three of them are not actually empty, and checking first is why.** Captured
+from the running app rather than assumed:
+
+- **`/api/collections/suggestions` generates real content** — shoots derived
+  from the library, not stored rows. `suggestions.py` (1,250) is a working
+  feature and stays until it is rebuilt as a query.
+- **`/api/keywords` returns 74 real keywords.** They are decisions, already in
+  the log.
+- **`/api/stacks/identical/*` is duplicate detection over content hashes**, and
+  works. Only the *stack* tables are empty; the finder is live and its
+  replacement is `api.duplicates`.
+
+The genuinely inert routes, with the exact shapes their replacements must
+return, so this does not need re-deriving:
+
+```
+/api/collections/tree      {"nodes": [], "links": [], "root_ids": []}
+/api/user-collections      {"collections": []}
+/api/saved-views           {"views": []}
+/api/tags                  {"tags": []}
+/api/stacks                {"stacks": [], "total": 0, "rebuild_status": {...idle}}
+/api/stacks/representatives {"representatives": {}}
+/api/people                {"sections": {most_seen, named_people, needs_review,
+                            other_faces}, "counts": {...}, "status": {...}}
+```
+
+`/api/people/status` reports `available: false` — insightface and onnxruntime
+are not installed — so people is not a subsystem here at all. In the core's
+terms it is a **cache kind whose `here()` is false**: owed work this machine
+cannot do, which records nothing rather than a failure.
+
+## Develop: which half is which
+
+Measured 08-16, by asking which files touch a database, a route, or the cache.
+The answer is unusually clean, and it is what makes this surface safe to work
+on without an acceptance set — as long as the left column is not opened.
+
+**Mathematics — 22 files, ~5,700 lines. Stays byte-identical.**
+`pipeline` · `masks` · `dng_pipeline` · `adobe_profiles` · `ops_constants` ·
+`film` · `noise_profiles` · `guided_filter` · `transform` · `lens` · `looks` ·
+`heal` · `lossydng` · `autotone` · `highlights_recon` · `camera_profile` ·
+`sigmoid_view` · `ramps` · `shots` · `discovery` · `native_exif`
+
+None of these import `db`, a router, or the cache. They are pure functions over
+pixels, fitted against real acceptance data, and **being wrong about them is
+silent** — a plausible image that is not the one the owner made. They are not
+touched until there is an agreed acceptance set.
+
+**Plumbing — the rest.** `routes` (1,228) · `rawproc` (709) · `render` (642) ·
+`lrcat_import` (526) · `xmp_write` (500) · `hdr` (378) · `presets` (324) ·
+`importer` (273) · `ai_masks` (265) · `virtual_copies` (231) · `lua_table` ·
+`export_presets` · `preset_routes` · `base_cache_budget` (134) · four thin
+route files.
+
+Not all of it is disposable — presets, XMP write-back and Lightroom import are
+real features. What *is* disposable is the caching and scheduling: the develop
+base keyed on `(image_id, source_path)`, its private eviction budget, and
+`develop_history`.
+
+**The one ordering constraint left in the whole rewrite.**
+`base_cache_budget` cannot be deleted before the Develop base moves into
+`cache`, or that cache becomes unbounded. Re-keying the base onto the content
+hash is what makes `cache.evict` cover it — and is the same change that stops
+a re-decode wave the first time the archive is plugged in warm.
+
+## The Develop base: re-keyed, and what is still owed
+
+**Done.** `rawproc.base_name` names a base by content hash rather than row
+number. Rebuild the table, renumber or re-import and the base is still found,
+because the bytes did not change when the row did — the same fix tiles got when
+they became `<hash>-<size>.jpg`. Measured: first call after the change
+re-decoded in 24 s, second hit in 16 ms, and 143,803 of 144,473 cache rows
+belong to the archive, so this is the re-decode wave that used to follow
+plugging it in warm.
+
+Looked up rather than passed, and memoised: ten call sites hold an `image_id`
+and none holds a hash, and `cached_base_paths` is documented as an inexpensive
+probe. A photograph with no identity yet falls back to its row number, which is
+exactly as good as before and no worse.
+
+**Still owed, and `base_cache_budget.py` cannot go until it is done.** The
+bases are named by hash but still live as loose files rather than as `cache`
+rows, so `cache.evict` does not know about them and their private hourly
+eviction worker is still doing a real job. Registering them as a cache kind —
+`kind="base"`, `path` on disk, `bytes` recorded — is what finally makes one
+ceiling cover everything and deletes that worker.
+
+**What it must not touch.** Any of the 22 mathematics files. This is a cache
+key and a filename; if a pixel changes, something has gone wrong.
+
+## How it stays small
+
+Seven rules, each earned by a deletion in this rewrite rather than borrowed
+from a book. They are ordered by how much they removed.
+
+**1. Delete the question, not the answer.** Almost every large cut followed
+noticing that something had stopped being *asked*. `thumbnails/` was 9,160
+lines answering *when should a tile be made* and *where should it go*; owed
+became a query and where became a filename, so both questions vanished and
+took the module with them. Ask what a subsystem is deciding. If nothing is
+deciding it any more, the subsystem is already dead.
+
+**2. A four-figure file is usually held up by two or three small couplings.**
+`features/library/service.py` was 1,661 lines kept alive by one 8-line
+function that belonged in collections. The people stack came out because a
+search resolver took two injected callables. db.py's ranking facade was seven
+wrappers with no callers. **Find the coupling, not the file** — the file falls
+over on its own.
+
+**3. If a fix needs a guard, look for the version that needs no guard.**
+"Clear cache" was `shutil.rmtree(root)` behind a marker check that was the only
+thing between a settings typo and someone's Documents folder. Deleting exactly
+the files we recorded writing made the guard *unnecessary* rather than better.
+A guard is a sign the operation is shaped wrong.
+
+**4. Make the invariant mechanical, not advisory.** "A recipe is never a
+timestamp" was a comment for years and broke anyway. Now a kind declares its
+parameters and `canonical()` refuses anything else. Doctrine decays; a
+`ValueError` does not.
+
+**5. One table per idea, and derive the rest.** `decisions` and `cache`
+absorbed roughly ten tables between them. Elo, the folder tree, edit history,
+snapshots, status counts and tag lists are all *computed* — and each stopped
+being a thing that could disagree with the truth. Storage is a liability you
+pay for in reconciliation.
+
+**6. Give one job to one place, then let concurrency be a number.** Three
+preview workers arbitrating through a governor became one loop plus a lane
+index. Lanes need no claims, leases or visibility timeouts, because a worker
+that dies leaves nothing to expire — the queue is a query.
+
+**7. Verify by running it.** Every real bug this session was found this way and
+none by reading: an empty grid behind a 200, a livelock that had stopped tiles
+at 95, a middleware import that 500'd everything, a table whose deletion would
+have broken every fresh install, 75 sidecars offered as photographs. `app OK`
+proves imports resolve and nothing else.
+
+**The measurement.** 106,940 lines to ~74,000, and the part doing the work is
+~3,500. Not because anything was written tersely — the core is heavily
+commented — but because most of what was there had stopped being asked.
+
+## Alongside Lightroom
+
+Working nicely beside Lightroom Classic is a selling point, so it is worth
+saying exactly what the integration is:
+
+> **There isn't one. Lightroom's channel to Azimuth is the photograph.**
+
+Lightroom Classic keeps rotations, stars and labels in its catalog until you
+ask it to write them out. When you do — Save Metadata to Files, or better,
+Catalog Settings → Metadata → *Automatically write changes into XMP* — it puts
+them in the photograph: the TIFF/DNG header for formats it can write into, an
+`.xmp` sidecar for proprietary raws. Azimuth reads the photograph. That is the
+whole of it.
+
+A `.lrcat` reader was built, deleted, and then brought back in a different
+category — and the correction is worth keeping, because the first version of
+this section was confidently wrong.
+
+The principle is right for everything Lightroom has been *told* to write out.
+It is silent about what it has not. Measured across this machine's three
+catalogs — and there are three, not one; the first search looked in a single
+folder and concluded from that — **2,953 photographs are turned in Lightroom
+and carry no orientation in the file**, because Save Metadata was never run on
+them. A principle that loses the owner's decisions is incomplete, not pure.
+
+So the reader exists again as an **adoption**, the same category as the oplog
+adoption before it, and not as the runtime coupling that was removed:
+
+* it runs when asked, files what it finds into the log, and is then done;
+* nothing in the request path reads a `.lrcat`, so Adobe renaming a table
+  breaks a future import and nothing else;
+* running it twice writes nothing the second time.
+
+**The safety rule is the whole of it.** A turn can already be in the file — a
+camera's flip, which `rawpy` honours, or pixels an application rewrote — and
+adopting on top of that lays a correct photograph on its side. So: *adopt only
+where Azimuth is currently showing the photograph the other way round from
+Lightroom.* That compares two presentations instead of trusting either.
+
+The number that justifies the rule: of those 2,953, **2,849 were already
+upright** and only **375** were genuinely flat. An adoption that trusted the
+catalog would have turned 2,849 correct photographs onto their sides. Worse,
+the count *before* their dimensions were read looked like 1,872 — the
+difference is entirely photographs whose `width`/`height` had never been
+measured, so the check silently could not run. **A safety rule that reads a
+fact the catalog does not have is not a safety rule.**
+
+**Then the same mistake again, one step further in.** That fix read the file
+only when the dimensions were *missing*, and went on trusting the column when
+it was merely *wrong* — so 8 photographs whose stored shape was stale passed
+the check and were turned onto their sides. Found by rendering the roll and
+looking at it, an hour after writing down that `aspect_ratio` cannot be trusted
+for precisely this reason. The rule now measures every candidate:
+
+> **A stored dimension is a cached answer and can be stale. The photograph
+> cannot.** Anything deciding which way up a picture goes reads the file.
+
+Cost: one header read per candidate. The repair pass that found it retracted 8
+and kept 369, and re-running it retracts nothing — which is the only evidence
+worth having that a rule of this kind is right.
+
+**Measured, on the roll this was built for:** with orientation written to the
+files, `decode()` agreed with Lightroom on **40 of 40** frames, 18 turned and
+22 upright, with no Lightroom-specific code in the path.
+
+### What a file changing costs, and the one word that pays it
+
+Saving metadata **rewrites the photograph**. All 40 files changed size and
+digest. That invalidates more than it looks like:
+
+* the tiles, which were computed from bytes that no longer exist;
+* `width`/`height`, which is what the grid sizes each cell from;
+* the **content hash — which is the subject of every decision.** 88,809 of
+  them, 79,512 develop edits among them. At the time this was measured the
+  digest covered the first 8 MiB; V2 now hashes the complete file, and metadata
+  changes still change that identity as they should.
+
+That last one was the sharp edge: the prefix hash was documented as *"never
+identity"* and was nonetheless what `decisions.subject` held. Full-content
+identity removes that contradiction; `decisions.carry` still preserves the
+owner's history when another application deliberately changes the file.
+
+All of it is paid by one word. `synchronize` reports **`changed`** beside
+`new` and `missing` — a photograph whose file is present but is no longer the
+file we read. Size is the test: already recorded for all 144,271 photographs,
+so it needs no migration, and it costs the `stat` the walk is doing anyway.
+Applying a change re-reads the file and calls `decisions.carry`, which appends
+the current answer in each family under the new digest. Not a migration and
+not a merge — the old rows stay exactly where they are, so the record of what
+was decided when is never rewritten.
+
+The reason to like this: it is not about Lightroom. `changed` is equally the
+answer for darktable writing a sidecar, a file restored from backup, a re-scan
+after a repair, and every future application that edits a photograph in place.
+
+### Orientation on TIFFs, and why it is left alone
+
+**Pillow does not surface a TIFF's orientation tag.** `getexif()` returns `1`
+while the file's own `tag_v2[274]` reads `8`, so `ImageOps.exif_transpose` —
+which reads `getexif()` — is a silent no-op on every TIFF. `decode()` therefore
+ignores TIFF orientation entirely.
+
+That is a real gap and it is deliberately **not** closed, because on this
+archive closing it would break photographs that are currently right. Measured
+across 14 film rolls on both drives: exactly one roll carries orientation at
+all, and on that roll the 18 tagged frames are *already stored portrait*.
+Honouring the tag would turn them again and lay 18 correct photographs on their
+side. Lightroom appears to rewrite a TIFF's pixels when saving metadata while
+leaving the old tag behind, so the tag and the pixels each claim the turn.
+
+The rule that follows: **a tag that disagrees with the pixels is not evidence,
+and the pixels are what the owner sees.** If TIFF orientation is ever honoured
+it needs a way to tell a live tag from a spent one, and there is none in the
+file. Until then this is recorded as known and shaped, not forgotten.
+
+Every other roll is 100% landscape with every tag upright — the lab delivers
+frames the way the scanner fed them and writes no orientation. For those, no
+rotation data exists anywhere and none can be recovered; turning them is a
+decision, which is what `{`/`}` and the context menu are for.
+
+### What is deliberately not read
+
+Adobe's `crs:` develop settings. They are a private edit format, and rendering
+someone else's edit *wrongly* is worse than not rendering it. Stars, labels and
+orientation transfer exactly because they are the fields that mean the same
+thing everywhere.
+
+### What this deleted
+
+`web/lightroom.py` (136 lines) and `POST /api/lightroom/read`, plus
+`POST /api/folder/rotate`. The last one is worth its own sentence, because it
+read as a labour saver and was a footgun: "a lab scans a roll the same way
+round" is true, and then the photographer turns individual frames, which is
+the only reason the roll needed attention at all. Pointed at one roll it wrote
+40 corrections over Lightroom's 18, and the 22 upright frames came back
+sideways. **A verb that is wrong exactly when it is used is not a shortcut.**
+
+## Where the remaining lines are, and what it costs to remove them
+
+Measured 08-16, and it changes what "keep carving" means from here.
+
+Two instruments were pointed at the tree looking for a large easy deletion, and
+both came back nearly empty. Walking the import graph from `app.py` finds
+**2,650 lines no module reaches**. Enumerating every registered route in mount
+order finds **three** handlers shadowed by an earlier mount — `/api/catalog`,
+`/api/folders/tree` and one flag route, all beaten by `api.py`. That is the
+whole of the dead code.
+
+**So the easy deletions are done.** The remaining 27,641 lines in `features/`
+are live: they answer 142 of the app's 194 endpoints. Nothing can be cut by
+finding what nobody calls, because nearly everything is called.
+
+What is left is a density problem, and it is measurable:
+
+| Area | Lines | Routes | Lines per route |
+|---|---:|---:|---:|
+| `features/quality/` | 1,019 | 3 | 340 |
+| `features/develop/` | 11,673 | 38 | 307 |
+| `features/trash/` | 1,012 | 4 | 253 |
+| `features/system/` | 2,149 | 10 | 215 |
+| `features/imports/` | 2,894 | 16 | 181 |
+| `features/catalog/` | 2,063 | 13 | 159 |
+| `features/collections/` | 2,167 | 14 | 155 |
+| `features/library/` | 1,953 | 20 | 98 |
+| **`api.py`** — the same job on the core | **876** | **37** | **24** |
+
+`api.py` answers more endpoints than any feature package and is smaller than
+all but one of them, because a handler on the core is a name, an argument or
+two, and one call. **The ratio is the estimate**: a surface rebuilt on the core
+costs roughly a tenth of what it costs beside it, and the difference is the
+machinery the core makes unnecessary — not the feature.
+
+That is also why the next move is not another survey. Every remaining line is
+attached to something the product does, so it comes out one surface at a time,
+each rebuilt and its machinery deleted in the same commit — the build order
+above, in the order of that table.
+
+## Deletion guard rails
+
+A survey of all eight surfaces (08-16) named **91,676 lines** the core makes
+unnecessary. An adversarial pass over those kill lists then found **36 places
+where deleting would have cost something**, and it is worth stating plainly
+that the adversarial half earned its keep: two of its findings were live
+defects in code already written, not hypotheticals.
+
+Everything below must be *handled* before the file or column it names is
+deleted. Handled, not preserved — most of these end up somewhere better.
+
+| Do not delete until | Because |
+|---|---|
+| ~~`photo/location.py`~~ **Discharged** | A fresh V2 sweep admits only real files with safe tails and explicit copy facts; tail-less V1 rows are user-data adoption work, never a reason for normal reads to probe drive letters. The resolver and its tests are deleted. |
+| `catalog_sources` · `images.source_id` | `included = 0, removed_at` on source 4 is an **owner decision**: 10,689 photographs deliberately removed. Now carried by *"a photo with no tail is not in the library yet"*, which needs no join. |
+| `features/sync/oplog.py` | It is already an append-only decision log keyed on content hash — 311 rows of keywords, flags, edits and statuses existing nowhere else. **Adopted `550e6bd6`.** |
+| `develop_settings.origin` | 79,482 rows are `origin='xmp'` and **5 are `origin='user'`**. It is what stops an XMP re-import overwriting an edit the owner made here. |
+| `develop/routes.py` settings-merge | Keeps 377 mask rows and 7,035 `LocalExposure2012` values through a partial save. |
+| `thumbnails/disk_store.cache_dir_safe_to_clear` | The only guard between "Clear cache" and `shutil.rmtree` of an arbitrary user folder. |
+| `features/system/backups.py` restore + retention | The whole restore engine and the always-keep-premigrate rule. Nothing else protects a catalog. |
+| `trash/service.py` away-guard | `_inspect_trash_file` treats `FileNotFoundError` as success, so trashing a photo whose drive is *away* would report success having moved nothing. |
+| `import_batch_image_ids` | Scopes the comparison engine — the thing that produces the irreplaceable pairs. Not history. |
+| `search/similar.scan_duplicate_pairs` | Live second caller in `stacks/builders.py`. |
+| `cache_entries` | Joined by ranking, search, AI and quality SQL, and it has triggers. |
+
+**One claim in that pass is overruled, deliberately.** `propagation_updates`
+(2,263 rows) was defended as "the only record of which neighbour received which
+delta, and it cannot be recomputed". It cannot — and it does not need to be.
+The whole point of making ranking a derivation is that the *output* is
+disposable; an undo journal for a value that is recomputed from scratch is
+machinery guarding something that no longer needs guarding.
+
+## Tests
+
+**32,892 lines across 141 files** (measured 08-15). The source-text contract
+suite — `test_desktop_correctness.py`, `test_ui_contracts.py`,
+`test_mobile_contracts.py`, `test_modular_contracts.py`, and the 424 assertions
+that read frontend source as literal text — **is already gone**, deleted in an
+earlier wave. So the remaining problem is size, not coupling: the two largest
+files alone are 6,332 lines.
+
+- **Tests arrive with their step**, as step 1 did: 7 behaviour tests, 0.21 s.
+- **What earns a test**: the seven functions; the five acceptance properties; the
+  perf budgets; and each lesson in the appendix that a naive rewrite would
+  destroy.
+- **A test may not read source code as text**, so the old suite cannot grow back.
+- Old tests die with the code they cover — a step that deletes a subsystem
+  deletes its tests in the same commit, rather than leaving them to rot red.
+
+Target: **~5,000 lines**, full suite under a minute.
+
+## First run
+
+"Point me at your photos." Pick a folder → attach it as a drive immediately →
+sweep on its own bounded connection while the grid fills in committed batches.
+Then one optional question: *do you have an archive
+drive?* → attach, mark as record. **First run and "add a drive later" are the
+same code path**, so no wizard duplicates settings. Today's `setup.html` is 309
+lines, ~125 of them hub-era pairing against routes that no longer exist.
+
+---
+
+## What disappears
+
+`source_id` and "excluded source" — measured: all 10,689 `C:\Pictures` hashes are
+also in the archive, zero unique, zero judgments, so they are copies on a third
+drive and the 10,750-duplicate merge stops existing rather than needing a
+procedure. `filepath` as stored data. `missing_at` and the whole mass-missing
+apparatus. `hub_remote`, `row_version` and its triggers. Move and rename
+detection, `rebind_moved_source`. The 93,220-row face backlog and its six
+triggers, three scan ledgers, five cursor tables, seven preview schedulers, three
+near-identical AI workers, thirteen admission gates. `crosssource` stacks.
+`develop_history`. Every per-column date-authority `CASE`. The entire network
+layer.
+
+## Size, and the one gate
+
+Measured 2026-08-15: **146,178 lines** — 74,266 Python, 32,777 tests, 39,135 UI.
+Target: **backend ~12k, tests ~5k, UI ~25k ≈ 40k total.**
+
+**One gate: a line budget that fails the build.** One number, zero maintenance,
+and it prices a second path, a stranded old path, and every piece of ceremony at
+the moment someone writes them. Raising it is its own one-line commit, so growth
+is visible rather than ambient.
+
+Two pieces of advice worth keeping anyway:
+
+- **If you had to *build* a feature, the model was missing a shape.** Develop
+  history stopped needing a table; move detection stopped needing code; the
+  duplicate merge stopped existing.
+- **Comments explaining *why* are not debt.** Debt is code nobody dared delete.
+
+## How you judge it
+
+1. A photo opens whether it's on the working disk or the archive.
+2. You move folders in Explorer or Lightroom; Azimuth follows without being told.
+3. Unplug the archive: the library still browses, searches and ranks.
+4. It says what isn't backed up, and backs it up when the drive is attached.
+5. "Free up space" never removes anything that isn't provably archived.
+
+**A guess may be wrong. A consequence may not.**
+
+---
+
+# Appendix — lessons that must survive
+
+Reference, not plan. Each is a bug already paid for once, and a clean rewrite is
+exactly the thing that reintroduces them.
+
+**Formats and decoding**
+- This archive holds **1,306 files named `.CR2` that are full-resolution JPEGs**.
+  RAW-ness is decided by the first three bytes, never the extension.
+- "Is this RAW?" was three different questions — is-it-RAW-data, can-Develop-
+  render-it, could-a-phone-have-made-it. Collapsing them into one set
+  reintroduces all three bugs.
+- Phones shoot DNG, so DNG provenance comes from the source, not the extension.
+- **2,480 of 44,521 JPEGs** end without an EOI marker; Pillow refuses them all
+  without `LOAD_TRUNCATED_IMAGES`. The picture is entirely there.
+
+**Memory and decode**
+- **9 GB peak per demosaic worker, measured, not estimated.** The old guess was
+  3 GB, so a 15 GB box was sized for two workers wanting 17 GB and was OOM-killed
+  every four minutes.
+- `rawpy`'s `postprocess` holds the GIL — a thread pool cannot parallelise
+  demosaic, it only adds contention.
+- `draft()` before `load()`: the archive holds photos to **527 MP**, 1.5 GB of RGB
+  each; full-decoding one for a 400 px tile is how the server reached 6.6 GB.
+- A budget that clamps an oversized weight to its own ceiling admits a frame at a
+  price the machine cannot pay: one 4.2 GB panorama was charged 768 MB and
+  OOM-killed the service four times in an hour.
+
+**SQLite and connections**
+- **Busy-timeout is a property of the request, not the connection.** Treating it
+  as connection state quietly opted every *interactive* caller out of the pool —
+  29 fresh connections against a 2.1 GB WAL while the grid waited.
+- Use `GLOB`, not `LIKE` — `LIKE` is ASCII-case-insensitive. For prefix rewrites
+  use `substr(filepath,1,?) = ?` so a bracket in a folder name cannot match
+  something else.
+- The visibility predicate's emitted SQL text is load-bearing: partial indexes
+  only apply when the query's `WHERE` implies theirs. Reword it and ranking falls
+  back to a table scan on 147k rows.
+- `INDEXED BY` is forced on the identity query, not left to the planner: 25.1 ms
+  versus 1.7 ms until someone runs `ANALYZE`, and nothing here ever does.
+- Ephemeral-WAL close uses `wal_checkpoint(PASSIVE)`, never `TRUNCATE`.
+
+**Windows**
+- `os.path.commonpath` and `relpath` **raise across different drives**. Group by
+  drive first.
+- `asyncio.run()` inside a worker thread destroys the loop and anything left open
+  with it — an aiosqlite connection then can never be closed, and the library
+  file cannot be deleted.
+- `fsync` on a directory is a no-op; `FlushFileBuffers` needs a *writable* handle,
+  so `"rb"` fsync fails — open `"rb+"`.
+- Folder keys travel the API as `/` while local rows store `\`.
+
+**Scanning and safety**
+- An unplugged drive and an emptied library look identical from inside a scan.
+  Hence the *lost* rule above.
+- `os.walk(onerror=…)` must raise rather than silently yield a partial tree.
+- The content hash reads the complete file and names its content; destructive
+  work still compares the actual byte streams immediately before removal.
+- `Astrophotography/` is fenced case-blind on the *resolved* path, everywhere —
+  over-fencing skips a file, under-fencing loses one.
+- Junk directories (`previewcache`, `__macosx`, `*.lrdata`, `.lrt`, …) are
+  recorded when excluded, not silently dropped.
+
+**Behaviour**
+- Statuses are only **kept / maybe / trashed**; startup rewrites anything else,
+  which is how a day of repairs once undid itself silently.
+- Film scanners stamp every frame `2026-01-01`. The roll's day comes from the
+  lab's own archive name.
+- Inferred dates are stamped at **noon**, so a timezone shift cannot move the day.
+- "A scope we cannot read matches nothing" — an unparseable filter must not
+  silently return everything.
+- **The politeness law:** browsing was 23 ms with chores quiet and *minutes* with
+  them running.
+- Perf budgets are product invariants, enforced in the default test suite. Never
+  widen a budget to mask slowness.

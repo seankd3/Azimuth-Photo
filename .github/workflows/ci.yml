@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # The product is a Windows desktop app; the check runs where it ships.
+    name: azimuth-check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: python -m venv web/.venv
+      - run: web/.venv/Scripts/python.exe -m pip install -r web/requirements-v2.txt -r web/requirements-dev.txt
+      - run: bash scripts/azimuth-check

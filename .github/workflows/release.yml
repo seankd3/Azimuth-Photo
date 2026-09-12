@@ -1,0 +1,40 @@
+name: Release Azimuth Photo
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-desktop:
+    name: Build unsigned Windows desktop app
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install the exact UI build dependency
+        run: npm ci
+      - name: Install the V2 desktop dependencies
+        run: python -m pip install -r web/requirements-v2.txt
+      - name: Build the one-process desktop app
+        run: python scripts/build_desktop.py
+      - name: Package the unsigned app
+        shell: pwsh
+        run: Compress-Archive -Path dist/azimuth-photo -DestinationPath "dist/azimuth-photo-windows-${env:GITHUB_REF_NAME}.zip"
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/azimuth-photo-windows-*.zip
+          fail_on_unmatched_files: true

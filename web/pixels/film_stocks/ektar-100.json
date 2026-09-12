@@ -1,0 +1,186 @@
+{
+  "slug": "ektar-100",
+  "name": "Kodak Ektar 100",
+  "iso": 100,
+  "process": "C-41",
+  "type": "negative_color",
+  "white_point_hint": "daylight",
+  "white_point_kelvin": 5500,
+  "hd_curves": {
+    "r": [
+      [
+        -2.0,
+        0.01
+      ],
+      [
+        -1.2,
+        0.04
+      ],
+      [
+        -0.6,
+        0.09
+      ],
+      [
+        0.0,
+        0.15
+      ],
+      [
+        0.6,
+        0.52
+      ],
+      [
+        1.2,
+        0.9
+      ],
+      [
+        1.8,
+        1.22
+      ],
+      [
+        2.6,
+        1.45
+      ]
+    ],
+    "g": [
+      [
+        -2.0,
+        0.01
+      ],
+      [
+        -1.2,
+        0.05
+      ],
+      [
+        -0.6,
+        0.1
+      ],
+      [
+        0.0,
+        0.15
+      ],
+      [
+        0.6,
+        0.53
+      ],
+      [
+        1.2,
+        0.91
+      ],
+      [
+        1.8,
+        1.24
+      ],
+      [
+        2.6,
+        1.47
+      ]
+    ],
+    "b": [
+      [
+        -2.0,
+        0.01
+      ],
+      [
+        -1.2,
+        0.04
+      ],
+      [
+        -0.6,
+        0.09
+      ],
+      [
+        0.0,
+        0.15
+      ],
+      [
+        0.6,
+        0.51
+      ],
+      [
+        1.2,
+        0.89
+      ],
+      [
+        1.8,
+        1.21
+      ],
+      [
+        2.6,
+        1.44
+      ]
+    ]
+  },
+  "spectral_crosstalk": [
+    [
+      0.88,
+      0.09,
+      0.03
+    ],
+    [
+      0.05,
+      0.86,
+      0.09
+    ],
+    [
+      0.02,
+      0.12,
+      0.86
+    ]
+  ],
+  "dir_coupler": [
+    [
+      1.0,
+      -0.14,
+      -0.1
+    ],
+    [
+      -0.13,
+      1.0,
+      -0.14
+    ],
+    [
+      -0.09,
+      -0.13,
+      1.0
+    ]
+  ],
+  "grain": {
+    "rms_granularity": 3.5,
+    "size_px_at_4k": 1.5,
+    "shadow_bias": 0.6,
+    "r": {
+      "rms_granularity": 3.5,
+      "size_px_at_4k": 1.5,
+      "shadow_bias": 0.6
+    },
+    "g": {
+      "rms_granularity": 3.5,
+      "size_px_at_4k": 1.5,
+      "shadow_bias": 0.6
+    },
+    "b": {
+      "rms_granularity": 3.5,
+      "size_px_at_4k": 1.5,
+      "shadow_bias": 0.6
+    }
+  },
+  "halation": {
+    "amount": 0.04,
+    "threshold": 0.68,
+    "radius_frac": 0.022,
+    "green_fraction": 0.07
+  },
+  "base": {
+    "orange_mask_rgb": [
+      0.92,
+      0.5,
+      0.2
+    ],
+    "base_fog_density": 0.08
+  },
+  "print_paper": {
+    "gamma": 2.7,
+    "shoulder": 0.8
+  },
+  "notes": "H&D approx from Kodak Ektar 100 datasheet Status M curves. Higher contrast than Portra; straight-line gamma \u2248 0.62. Spectral crosstalk from Ektar sensitivity plots \u2014 narrower peaks / less overlap than Portra, feeding saturated landscape color. Strongest C-41 pro DIR in this set (Ektar's signature separation). Diffuse RMS Granularity ~3.5 from Kodak Ektar 100 datasheet. Fine grain pitch. Halation minimal. Memory approximation of published curves. | grain keys flattened so engine reads datasheet RMS (no local Ektar 100 scans) 2026-07-10"
+}
