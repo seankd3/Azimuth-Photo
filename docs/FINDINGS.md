@@ -622,11 +622,11 @@ finding was checked and the numbers said no.
 | BC16 | The bench has no row for the verbs found slow; PERF_BUDGETS.md says no V2 bench exists | rows added, budgets per shape, the doc names the bench | shipped: plus a filename index (page at depth 96 → within budget) |
 | FR1 | An import reads every file five times | `photos.copy_verified`: the bytes are hashed on their way through the copy and the copy is hashed once to verify; the row records that digest; the backup copies the same way (the third variant of copy-then-compare is gone); the card is read twice (identity, then the copy) and the copy once | shipped |
 | FR2 | Staging opens every file's EXIF on the card: half a minute of seeks | deferred: the capture second is how a re-inserted card is recognised (the import renames files, so the name never matches); mtime would lose that; the honest answer is reading the tags on the intake lane with the count growing, which the stage already shows | open |
-| FR3 | Every staged thumbnail decodes a raw on the bridge thread, unbounded | deferred to an import round with FR7: the stage's own lane and a key→cell map are one change | open |
+| FR3 | Every staged thumbnail decodes a raw on the bridge thread, unbounded | deferred to an import round with FR7: the stage's own lane and a key→cell map are one change | shipped, as the row of the same number under Import workspace |
 | FR4 | The first grid tile always decodes at loupe size, so small embedded previews never qualify: 3 s a frame | decode at grid size when only the grid tile is owed | shipped |
 | FR5 | Ejecting the card mid-import yields 1,900 unreadable and phase done | the run stops and says the card was removed | shipped |
 | FR6 | A mixed import prints the same sentence twice (already vs skipped) | one clause for identity, one for the file already at its place | shipped |
-| FR7 | The stage is not virtualised; a day checkbox costs ~4,000 DOM queries | a key→cell map; only what changed is touched | open |
+| FR7 | The stage is not virtualised; a day checkbox costs ~4,000 DOM queries | a key→cell map; only what changed is touched | shipped, as the row of the same number under Import workspace |
 | FR8 | The first-run path is clean | measured: keep | measured: keep |
 
 ## People (2026-09-10)
