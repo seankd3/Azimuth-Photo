@@ -59,7 +59,10 @@ def main() -> int:
         return 2
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     bundle = OUTPUT.with_suffix(".js")
-    subprocess.run(
+    # Output captured and no console: the window builds its own document
+    # at launch (desktop.bundled_document), and a console child of a
+    # windowless process would flash a black window on the desktop.
+    said = subprocess.run(
         [
             "node",
             str(ESBUILD),
@@ -71,8 +74,15 @@ def main() -> int:
             f"--outfile={bundle}",
         ],
         cwd=ROOT,
-        check=True,
+        check=False,
+        capture_output=True,
+        text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
+    if said.returncode != 0:
+        # esbuild's own message; the node trace behind it says nothing more.
+        print(said.stderr.split("node:child_process", 1)[0].strip(), file=sys.stderr)
+        return said.returncode
     try:
         OUTPUT.write_text(
             render(
