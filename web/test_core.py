@@ -2753,6 +2753,12 @@ class SharpnessIsRelative(CoreCase):
         self.assertEqual(sweep["members"], [1, 2, 3])
         self.assertEqual(sweep["direction"], "left to right")
         self.assertTrue(0.3 <= sweep["overlap"] <= 0.5, sweep)
+        # Merged, the three frames are one canvas about the scene's width
+        # (1,400 of 1,800 px) with the black border trimmed away.
+        merged = panorama.merge([f["path"] for f in frames])
+        self.assertIsNotNone(merged)
+        self.assertGreater(merged.shape[1], 2 * width)
+        self.assertLess(float((merged.max(axis=2) <= 8).mean()), 0.01)
         burst = [{"id": 9, "path": frames[0]["path"]}] * 3
         self.assertIsNone(panorama.judge(burst, lambda f: f["path"]))
 

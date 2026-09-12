@@ -814,6 +814,7 @@ button kbd { color: var(--text-3); font: var(--t-label)/1 var(--mono); }
 .facts .fact.is-link { cursor: pointer; text-decoration: underline dotted var(--line-strong); text-underline-offset: 3px; }
 .facts .fact:hover { color: var(--text); }
 .facts .fact:focus-visible { outline: 1px solid var(--focus); outline-offset: 2px; }
+.facts .sweep-strip { grid-column: 1 / -1; width: 100%; margin-top: 6px; border-radius: 3px; cursor: zoom-in; }
 .glance-hint kbd { padding: 1px 6px; border: 1px solid var(--line-strong); border-radius: 3px; color: var(--text-2); font: var(--t-label)/1.5 var(--mono); }
 
 dialog { color: var(--text); }

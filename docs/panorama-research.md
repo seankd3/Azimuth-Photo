@@ -122,6 +122,12 @@ the blender instead.
    badge on the run, a preview strip from the 1,024 tiles, the confidence
    report and the honest refusal. No merged file is written. This is
    `stacks.py`'s existing proposal with one new fact (pair overlap).
+   *Shipped 2026-09-12 as PN1 (the fact: `panorama.of`, the inspector row,
+   S stacks the sweep) and PN4 (the preview: `panorama.preview` merges the
+   loupe tiles with OpenCV's stitcher, trims the canvas, keeps one file on
+   the run; the Panorama fact opens it in the loupe as a preview). The
+   preview is judged from the 4,096 px loupe tiles rather than the 1,024,
+   because they were there and cost the same seconds.*
 2. **Full-resolution merge.** The detailed API reusing the first slice's BA;
    projection by field of view; blocks gain, graph-cut seams, multi-band;
    auto-crop with the canvas kept; a 16-bit TIFF that becomes the stack cover.

@@ -1,8 +1,12 @@
-"""A panorama sweep: consecutive frames that overlap one way.
+"""A panorama sweep: consecutive frames that overlap one way, and its preview.
 
-Nothing merges anything here. This is the fact the library can know from a
-run of frames -- that they were swept, not burst -- so that S can stack them
-as one and the inspector can say so. The rule (docs/panorama-research.md):
+The fact first: that a run of frames was swept, not burst, so that S can
+stack them as one and the inspector can say so. Then, asked for, the
+preview: the frames merged from their loupe tiles (OpenCV's stitcher:
+bundle adjustment, wave correction, gain compensation, seams and a
+multi-band blend), the black canvas trimmed, kept as one file on the run.
+No photograph is written into the library by this module; the full-size
+merge that becomes a stack's cover is PN2. The rule (docs/panorama-research.md):
 
 * **the frames** -- three to MOST, consecutive by capture time, each within
   SWEEP_GAP seconds of the last, one camera, one size, one folder;
@@ -168,6 +172,23 @@ def judge(frames: list[dict], tile_of) -> dict | None:
 
 
 KIND = cache.Kind(name="sweep", compute=lambda source, hash: None, params=("model", "run"), evictable=True)
+MERGE = cache.Kind(name="merge", compute=lambda source, hash: None, params=("model", "run"), evictable=True,
+                   remove=lambda path: os.path.isfile(path) and os.unlink(path))
+MERGE_KEY = "stitch1"   # the merge's version
+
+
+def _tile_of(tiles, size: int):
+    """The frame's tile at this size: the plain one, or an edited frame's
+    own rendition when that is the one on disk (its tiles are keyed by the
+    edit)."""
+
+    def tile(frame) -> str:
+        plain = tiles.path(frame["hash"], size)
+        if os.path.isfile(plain) or not frame.get("develop"):
+            return plain
+        return tiles.path(frame["hash"], size, json.loads(frame["develop"]))
+
+    return tile
 
 
 def of(conn, tiles, photo_id: int) -> dict | None:
@@ -175,7 +196,8 @@ def of(conn, tiles, photo_id: int) -> dict | None:
     kept as a cache row on the run's first frame keyed by the run's members,
     so the inspector's ask costs a read after the first, and a run that
     changes is judged again. Nothing is kept until every tile is there to
-    look at: a run the library has not drawn yet is not a refused one."""
+    look at: a run the library has not drawn yet is not a refused one. The
+    answer carries the run's key (`first`, `run`) for the preview."""
 
     import render
 
@@ -183,24 +205,105 @@ def of(conn, tiles, photo_id: int) -> dict | None:
     if not LEAST <= len(frames) <= MOST:
         return None
     first = frames[0]["hash"]
-    recipe = {"model": KEY, "run": hashlib.sha1("".join(f["hash"] for f in frames).encode()).hexdigest()[:16]}
+    run = hashlib.sha1("".join(f["hash"] for f in frames).encode()).hexdigest()[:16]
+    recipe = {"model": KEY, "run": run}
     held = cache.get(conn, first, KIND, recipe)
     if held is not None and held.get("state") == cache.READY:
-        said = json.loads(held["value"]) if held.get("value") else None
-        return said if said and int(photo_id) in said["members"] else None
-    def tile_of(frame) -> str:
-        # The plain tile; an edited frame's own rendition when that is the
-        # one on disk (its tiles are keyed by the edit).
-        plain = tiles.path(frame["hash"], render.GRID)
-        if os.path.isfile(plain) or not frame.get("develop"):
-            return plain
-        return tiles.path(frame["hash"], render.GRID, json.loads(frame["develop"]))
-
-    if not all(os.path.isfile(tile_of(frame)) for frame in frames):
+        verdict = json.loads(held["value"]) if held.get("value") else None
+    else:
+        tile_of = _tile_of(tiles, render.GRID)
+        if not all(os.path.isfile(tile_of(frame)) for frame in frames):
+            return None
+        verdict = judge(frames, tile_of)
+        if held is None:
+            made = json.dumps(verdict, separators=(",", ":")) if verdict else ""
+            cache.put(conn, first, KIND, cache.Made(value=made, bytes=len(made)), recipe)
+            conn.commit()
+    if not verdict or int(photo_id) not in verdict["members"]:
         return None
-    verdict = judge(frames, tile_of)
-    if held is None:
-        made = json.dumps(verdict, separators=(",", ":")) if verdict else ""
-        cache.put(conn, first, KIND, cache.Made(value=made, bytes=len(made)), recipe)
+    return {**verdict, "first": first, "run": run}
+
+
+def _trimmed(pano):
+    """The merged canvas without its black border: whichever edge is
+    blackest is trimmed until none is more than a hundredth black, judged
+    on an eighth-scale mask so a 9,000 px canvas costs milliseconds."""
+
+    import cv2
+    import numpy as np
+
+    scale = 8
+    small = cv2.resize(pano, (max(1, pano.shape[1] // scale), max(1, pano.shape[0] // scale)), interpolation=cv2.INTER_AREA)
+    mask = (small.max(axis=2) > 8).astype(np.float32)
+    top, bottom, left, right = 0, mask.shape[0], 0, mask.shape[1]
+    while bottom - top > 2 and right - left > 2:
+        edges = (("top", 1 - mask[top, left:right].mean()), ("bottom", 1 - mask[bottom - 1, left:right].mean()),
+                 ("left", 1 - mask[top:bottom, left].mean()), ("right", 1 - mask[top:bottom, right - 1].mean()))
+        side, black = max(edges, key=lambda e: e[1])
+        if black <= 0.01:
+            break
+        top, bottom, left, right = (top + (side == "top"), bottom - (side == "bottom"),
+                                    left + (side == "left"), right - (side == "right"))
+    return pano[top * scale:bottom * scale, left * scale:right * scale]
+
+
+def merge(paths: list[str]):
+    """The frames at these paths merged into one canvas (BGR), trimmed, or
+    None when the stitcher cannot place them."""
+
+    import cv2
+
+    frames = [cv2.imread(path) for path in paths]
+    if any(frame is None for frame in frames):
+        return None
+    status, pano = cv2.Stitcher.create(cv2.Stitcher_PANORAMA).stitch(frames)
+    if status != cv2.Stitcher_OK or pano is None:
+        return None
+    return _trimmed(pano)
+
+
+def _merge_recipe(sweep: dict) -> dict:
+    return {"model": MERGE_KEY, "run": sweep["run"]}
+
+
+def previewed(conn, sweep: dict) -> dict | None:
+    """The kept preview of this sweep -- path, width, height -- or None."""
+
+    held = cache.get(conn, sweep["first"], MERGE, _merge_recipe(sweep))
+    if held is None or held.get("state") != cache.READY or not held.get("path") or not os.path.isfile(held["path"]):
+        return None
+    return {"path": held["path"], **json.loads(held["value"])}
+
+
+def preview(conn, tiles, sweep: dict) -> dict | None:
+    """The sweep merged from its loupe tiles (the grid tiles where a loupe
+    is not there yet), kept as one file beside the tiles on the run's first
+    frame. Seconds of work: the caller runs it off the window's lane. None,
+    remembered, when the stitcher cannot place the frames."""
+
+    import cv2
+    import render
+
+    held = previewed(conn, sweep)
+    if held is not None:
+        return held
+    recipe = _merge_recipe(sweep)
+    if (row := cache.get(conn, sweep["first"], MERGE, recipe)) is not None and row.get("state") == cache.FAILED:
+        return None
+    frames = [dict(r) for r in conn.execute(
+        f"SELECT id, content_hash AS hash, develop FROM images WHERE id IN ({','.join('?' * len(sweep['members']))})"
+        " ORDER BY date_taken ASC, id ASC", sweep["members"])]
+    loupe_of, grid_of = _tile_of(tiles, render.LOUPE), _tile_of(tiles, render.GRID)
+    paths = [loupe_of(f) if os.path.isfile(loupe_of(f)) else grid_of(f) for f in frames]
+    pano = merge(paths) if all(os.path.isfile(p) for p in paths) else None
+    if pano is None:
+        cache.failed(conn, sweep["first"], MERGE, "the stitcher could not place the frames", recipe)
         conn.commit()
-    return verdict if verdict and int(photo_id) in verdict["members"] else None
+        return None
+    path = os.path.join(tiles.root, sweep["first"][:2], f"{sweep['first']}-merge-{sweep['run']}.jpg")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    cv2.imwrite(path, pano, [cv2.IMWRITE_JPEG_QUALITY, 88])
+    size = {"width": int(pano.shape[1]), "height": int(pano.shape[0])}
+    cache.put(conn, sweep["first"], MERGE, cache.Made(path=path, value=json.dumps(size), bytes=os.path.getsize(path)), recipe)
+    conn.commit()
+    return {"path": path, **size}

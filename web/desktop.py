@@ -435,6 +435,11 @@ class Desktop:
     def stack(self, photo_ids: list[int]) -> dict:
         return self._run(lambda library: library.stack(photo_ids))
 
+    def merge_preview(self, photo_id: int) -> dict | None:
+        if self._product is None:
+            raise RuntimeError("Choose where Azimuth should live first.")
+        return self._wait(self._product.merge_preview(int(photo_id)))
+
     def unstack(self, photo_ids: list[int]) -> dict:
         return self._run(lambda library: library.unstack(photo_ids))
 

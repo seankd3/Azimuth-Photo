@@ -63,7 +63,7 @@ STUB = r"""<script>
     look: () => 0,
     photos: (sort, limit, offset, view) => (sort === 'oldest' ? [...shown(view)].reverse() : shown(view)).slice(offset, offset + limit),
     size: (view) => shown(view).length, folders: () => [], photo: (pid) => shown(null).find((p) => p.id === pid),
-    stack: (ids) => ({ cover: ids[0], members: ids.slice(1) }), unstack: (ids) => ({ unstacked: ids }),
+    stack: (ids) => ({ cover: ids[0], members: ids.slice(1) }), merge_preview: () => null, unstack: (ids) => ({ unstacked: ids }),
     trash_photos: () => [], trash_count: () => 0,
     days: (view) => days.map((d, i) => (i === 0 ? { ...d, count: d.count + shown(view).length - N } : d)),
     sessions: () => [],

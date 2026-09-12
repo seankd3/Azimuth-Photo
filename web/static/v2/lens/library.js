@@ -530,7 +530,7 @@ function renderInspector(panel, selected, actions = {}) {
     ['Panorama', selected.sweep
       ? `${numbered(selected.sweep.members.length, 'frame')} sweep ${selected.sweep.direction}, ${Math.round(selected.sweep.overlap * 100)}% overlap`
         + (selected.stack_of || selected.stack ? '' : ' — S stacks them')
-      : '', { said: true }],
+      : '', { sweep: selected.sweep }],
     ['Dimensions', selected.width && selected.height ? `${selected.width} × ${selected.height}` : ''],
     ['Size', selected.file_size ? `${(selected.file_size / 1e6).toFixed(1)} MB` : ''],
     ['Folder', folder || 'The drive\u2019s root', folder ? { folder } : { said: true }],
@@ -552,6 +552,13 @@ function renderInspector(panel, selected, actions = {}) {
       control.classList.add('is-link');
       control.title = 'Browse this folder';
       control.addEventListener('click', () => actions.showFolder(how.folder));
+    } else if (how.sweep && actions.mergeSweep) {
+      // The sweep's preview: merged on the first press (seconds, off the
+      // window's lane), opened in the loupe from then on. The strip below
+      // the facts is the same preview, small.
+      control.classList.add('is-link');
+      control.title = how.sweep.preview ? 'Open the merged preview' : 'Merge a preview of the sweep';
+      control.addEventListener('click', () => actions.mergeSweep(selected));
     } else if (how.chip && actions.applyChip) {
       control.classList.add('is-link');
       control.title = 'Narrow to this camera';
@@ -564,6 +571,14 @@ function renderInspector(panel, selected, actions = {}) {
     }
     cell.append(control);
     facts.append(cell);
+  }
+  if (selected.sweep?.preview && actions.mergeSweep) {
+    const strip = element('img', 'sweep-strip');
+    strip.src = selected.sweep.preview.url;
+    strip.alt = 'The merged panorama';
+    strip.title = 'Open the merged preview';
+    strip.addEventListener('click', () => actions.mergeSweep(selected));
+    facts.append(strip);
   }
   panel.replaceChildren(heading, facts);
 }

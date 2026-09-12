@@ -794,6 +794,7 @@ function closeDriveDialog() {
 
 
 function closeLoupe() {
+  merged = null;
   if (loupe.classList.contains('is-full')) toggleFull(false);
   const back = loupeReturnsTo || 'library';
   loupeReturnsTo = null;
@@ -1391,6 +1392,28 @@ function teachLoupe() {
   if (times < 3) remember(TAUGHT_KEY, times + 1);
 }
 
+// The merged panorama the loupe stands in for a sweep's frame, once made:
+// {id, url, width, height}. Cleared when the loupe closes, so Enter on the
+// frame shows the frame.
+let merged = null;
+
+async function mergeSweep(photo) {
+  const held = photo.sweep?.preview;
+  if (held) {
+    merged = { id: photo.id, ...held };
+    showPhoto(photo);
+    return;
+  }
+  notify('Merging the sweep\u2026');
+  const made = await product.mergePreview(photo.id).catch((error) => { notify(why(error)); return null; });
+  if (!made) { notify('The frames could not be merged.'); return; }
+  const current = read().selected;
+  if (current?.id !== photo.id) return;
+  update({ selected: { ...current, sweep: { ...current.sweep, preview: made } } });
+  merged = { id: photo.id, ...made };
+  showPhoto(read().selected);
+}
+
 function showPhoto(photo) {
   // The loupe shows the best picture the row has: the loupe tile, else the
   // grid tile scaled up while the loupe tile is made first (the library is
@@ -1411,6 +1434,10 @@ function showPhoto(photo) {
 
 document.querySelector('[data-loupe-note]').setAttribute('role', 'status');
 function renderLoupe(photo) {
+  // A merged panorama stands in for its frame: shown as a preview (its
+  // own pixels, no larger truth behind it), until the loupe closes.
+  const stand = merged && merged.id === photo.id ? merged : null;
+  if (stand) photo = { ...photo, develop: true, loupe: stand.url, width: stand.width, height: stand.height };
   const source = photo.loupe || photo.tile || '';
   const note = document.querySelector('[data-loupe-note]');
   const { state, said } = presence(photo, Boolean(source));
@@ -1569,7 +1596,7 @@ function renderChrome(state) {
   filterBar.render(state);
   timeline.render(state);
   library.renderInspector(inspector.querySelector('[data-inspector-facts]'), state.selected,
-    { marked: state.marked, photos: state.photos, counts: state.counts, drives: state.drives, working: state.working, showFolder, applyChip, notify });
+    { marked: state.marked, photos: state.photos, counts: state.counts, drives: state.drives, working: state.working, showFolder, applyChip, notify, mergeSweep });
   editPanel.follows(state.view === 'loupe' ? state.selected : null);
   const held = state.counts.photos.toLocaleString();
   // The import workspace's own panel carries its counts; the library's
@@ -2295,7 +2322,7 @@ const SHORTCUTS = [
     ['Enter / Space / E', 'Open the loupe'], ['G', 'Back to the grid, from anywhere'], ['N', 'Survey the marked frames in Rank'],
     ['V', 'The pass: everything, the unflagged, the picked'],
     ['P / U', 'Pick / clear the pick', ['pick']], ['X', 'Reject', ['reject']],
-    ['R / Shift+R', 'Turn left / right', ['turn']], ['B', 'Toss into the Quick album'], ['S', 'Stack the marked frames, or the burst around this one; open or fold a stack'], ['Shift+S', 'Unstack'],
+    ['R / Shift+R', 'Turn left / right', ['turn']], ['B', 'Toss into the Quick album'], ['S', 'Stack the marked frames, or the burst or sweep around this one; open or fold a stack'], ['Shift+S', 'Unstack'],
     ['F', 'The clean room'], ['C', 'Crop'], ['D', 'Develop'], ['I', 'Import the card'], ['Ctrl+Wheel', 'Density'],
   ]],
   ['The mouse', [

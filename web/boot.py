@@ -1324,6 +1324,9 @@ class Library:
         import panorama
 
         answer["sweep"] = panorama.of(self.conn, self.tiles, int(photo_id))
+        if answer["sweep"]:
+            held = panorama.previewed(self.conn, answer["sweep"])
+            answer["sweep"]["preview"] = {**held, "url": Path(held["path"]).as_uri()} if held else None
         # Every name this photograph wears — palette tags, groups the space
         # formed, people — so the panel can answer "why is this here".
         import json as coding
@@ -1455,6 +1458,27 @@ class OwnedLibrary:
                 raise RuntimeError("library is closed")
             future = self._executor.submit(operation, self._library)
         return await asyncio.wrap_future(future)
+
+    async def merge_preview(self, photo_id: int) -> dict | None:
+        """The sweep around this photograph merged into a preview, made on
+        the sweep lane (seconds) so the window's lane stays free."""
+
+        with self._state:
+            if self._closed:
+                raise RuntimeError("library is closed")
+            future = self._scan_executor.submit(self._merge, int(photo_id))
+        return await asyncio.wrap_future(future)
+
+    def _merge(self, photo_id: int) -> dict | None:
+        import panorama
+
+        conn = model.connect(self._library.catalog_path)
+        try:
+            sweep = panorama.of(conn, self._library.tiles, photo_id)
+            held = panorama.preview(conn, self._library.tiles, sweep) if sweep else None
+            return {**held, "url": Path(held["path"]).as_uri()} if held else None
+        finally:
+            conn.close()
 
     async def refresh(self, drive_uuid: str, under: str = "") -> dict:
         """Sweep on its own connection so the library remains browseable."""

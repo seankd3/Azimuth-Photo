@@ -35,6 +35,7 @@ export const library = Object.freeze({
   undoCull: (changes) => invoke('undo_cull', changes),
   turn: (ids, by = 90) => invoke('turn', ids, by),
   stack: (ids) => invoke('stack', ids),
+  mergePreview: (id) => invoke('merge_preview', id),
   unstack: (ids) => invoke('unstack', ids),
   forget: (ids) => invoke('forget', ids),
   find: ({ query, limit, offset, view = null, like = [] }) => invoke('search', query, limit, offset, view, like),
