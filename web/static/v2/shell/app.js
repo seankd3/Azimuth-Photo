@@ -1754,21 +1754,6 @@ function renderChrome(state) {
   document.querySelector('[data-rank-mode]').hidden = !ranking;
   document.querySelector('[data-action="rank"]').hidden = state.view !== 'library' || searching;
   document.querySelector('[data-action="leave-rank"]').hidden = !ranking;
-  // A view change hands the keyboard to the stage that arrived, so the
-  // focus never falls to the body and the change is heard.
-  if (state.view !== viewShown) {
-    viewShown = state.view;
-    say({ library: 'Library', trash: 'Trash', rank: 'Rank', loupe: 'Loupe', people: 'People', import: 'Import' }[state.view] || state.view);
-    const stage = ranking ? document.querySelector('[data-rank]')
-      : holding ? loupe
-        : walled ? document.querySelector('[data-people-stage]')
-          : intaking ? null
-            : grid;
-    if (stage && !stage.contains(document.activeElement)) {
-      const first = stage.querySelector('.rank-card.is-selected, .face-card.is-focus, .strip-cell.is-current, .photo-cell.is-selected, .photo-cell');
-      (first || stage).focus({ preventScroll: true });
-    }
-  }
   document.querySelector('[data-result-label]').hidden = ranking || holding || walled || intaking;
   document.querySelector('[data-density]').closest('label').hidden = ranking || holding || walled;
   // The chips narrow the library view; Trash and the loupe are not places
@@ -1880,6 +1865,32 @@ function render(state) {
   // while still hidden measures a zero-width column.
   renderChrome(state);
   if (!['rank', 'loupe', 'import'].includes(state.view)) visibleGrid();
+  handoff(state);
+}
+
+// The keyboard never falls to the body. A view change hands it to the
+// stage that arrived, and the change is heard. A load hands it again: the
+// pass key, a folder, a chip or Esc un-narrowing rebuild the grid's rows,
+// and the cell that held the keyboard left with the old ones — so once the
+// rows have painted, the grid's one tab stop (the cursor, else the first
+// cell in view) takes it back, silently.
+function handoff(state) {
+  const changed = state.view !== viewShown;
+  if (changed) {
+    viewShown = state.view;
+    say({ library: 'Library', trash: 'Trash', rank: 'Rank', loupe: 'Loupe', people: 'People', import: 'Import' }[state.view] || state.view);
+  }
+  const stage = state.view === 'rank' ? document.querySelector('[data-rank]')
+    : state.view === 'loupe' ? loupe
+      : state.view === 'people' ? document.querySelector('[data-people-stage]')
+        : state.view === 'import' ? null
+          : grid;
+  const landed = stage === grid && !state.loading && document.activeElement === document.body;
+  if (stage && (changed || landed) && !stage.contains(document.activeElement)) {
+    const first = stage.querySelector('.photo-cell[tabindex="0"]')
+      || stage.querySelector('.rank-card.is-selected, .face-card.is-focus, .strip-cell.is-current, .photo-cell');
+    (first || stage).focus({ preventScroll: true });
+  }
 }
 
 driveForm.addEventListener('submit', async (event) => {
