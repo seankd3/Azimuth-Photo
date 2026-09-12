@@ -1181,6 +1181,11 @@ class Library:
 
         self._open()
         scope = self.ranking(view)
+        if str(mode) == "learn" and self._owner is not None and self._owner._unsure is None:
+            # Before the lane's first fit (it follows the first sweep, minutes
+            # on a slow disk): the fit over the rounds alone, once, kept until
+            # the lane's own replaces it. Without it Learn dealt the leaders.
+            self._owner._unsure = rank.fitted(rank.rounds(self.conn))[1]
         chosen = rank.candidates(self.conn, n, scope=all_of(scope, self.tiles.ready),
                                  avoid=avoid, mode=mode, space=space,
                                  unsure=self._owner._unsure if self._owner is not None else None)
@@ -1418,7 +1423,7 @@ class OwnedLibrary:
         self._ranking = False
         self._warming = False
         self._ranked = None            # (last round row, vector count) already written
-        self._unsure: dict[str, float] = {}   # the fit's own uncertainty, for Learn's draws
+        self._unsure: dict[str, float] | None = None   # the fit's own uncertainty, for Learn's draws
         self._space = None             # (vector count, subjects, matrix), append-only so count-keyed
         self._peopled = None           # (face rows, last person decision) already grouped
         self._labeled = None           # (vector count, last teaching) already written
@@ -1889,6 +1894,7 @@ class OwnedLibrary:
                 if here != self._library.here:
                     self._library.here = here
                     self._library.swept += 1
+                    self._library.chores.nudge()
                 passes += 1
                 if not first and (passes % max(1, int(every // 5))):
                     continue

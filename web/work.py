@@ -584,12 +584,16 @@ class Chores:
                     except Exception:
                         log.exception("worker=chores sweep failed")
 
-                # Idle lanes wait to be nudged, and stop wakes them too, so
-                # both new work and shutdown are immediate.
+                # Idle lanes wait to be nudged -- a sweep, a look, an import,
+                # a drive -- and stop wakes them too, so new work and shutdown
+                # are immediate. The clock is only the safety net: an idle
+                # step on a caught-up catalog walks every row per kind (100 ms
+                # at 8k, seconds at 150k), which every five seconds per lane
+                # was a core spent on nothing.
                 if did:
                     self._stopped.wait(0.05)
                 else:
-                    self._wake[lane].wait(5.0)
+                    self._wake[lane].wait(60.0)
                     self._wake[lane].clear()
         except Exception:
             log.exception("worker=chores stopped unexpectedly")

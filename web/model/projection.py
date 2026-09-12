@@ -9,9 +9,12 @@ UPDATE per row (24 s, every row dirtied, the write lock held throughout),
 and a rebuild that changes nothing writes nothing — which is the normal case
 at every start.
 
-Writes land in slices with a commit between, so the lock is never held for
-more than a few hundred milliseconds at a time; a cull key pressed during a
-full rerank waits that long, not the whole pass.
+A whole-table rebuild lands in slices with a commit between, so the lock is
+never held for more than a few hundred milliseconds at a time; a cull key
+pressed during a full rerank waits that long, not the whole pass. An act's
+own projection (`only`) is the act's transaction: it commits nothing, so
+the caller's commit lands the decisions and their projection together, or
+its rollback undoes both.
 """
 
 from __future__ import annotations
@@ -59,6 +62,8 @@ def project(conn, key: str, columns: Iterable[str], intended: dict, *,
         cursor = conn.executemany(
             f"UPDATE images SET {assignments} WHERE {key} = ?", rows[start:start + slice_rows])
         written += cursor.rowcount
+        if not only:
+            conn.commit()
+    if not only:
         conn.commit()
-    conn.commit()
     return written

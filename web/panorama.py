@@ -4,13 +4,20 @@ Nothing merges anything here. This is the fact the library can know from a
 run of frames -- that they were swept, not burst -- so that S can stack them
 as one and the inspector can say so. The rule (docs/panorama-research.md):
 
-* **the frames** -- three or more, consecutive by capture time, each within
+* **the frames** -- three to MOST, consecutive by capture time, each within
   SWEEP_GAP seconds of the last, one camera, one size, one folder;
 * **the overlap** -- on the 1,024 px tiles, ORB features matched between
   neighbours and verified by a RANSAC homography: each pair's overlap in
-  [OVERLAP_LEAST, OVERLAP_MOST] and its inliers past Brown & Lowe's bar
+  [OVERLAP_LEAST, OVERLAP_MOST] (a burst overlaps almost wholly and is
+  refused at its first pair) and its inliers past Brown & Lowe's bar
   (5.9 + 0.22 x matches); the frame two steps on overlaps less than the
-  next one (a burst overlaps everywhere); and the sweep keeps one direction.
+  next one; and the sweep keeps one direction.
+
+The judge looks at one pair at a time and stops at the first refusal, so a
+burst costs two frames' features and one match (a fifth of a second), and
+the whole run is looked at only when it is a sweep. The verdict is kept on
+the run's first frame, keyed by the run's members, so a frame rejected or
+brought in changes the run and the answer with it.
 
 Measured on the owner's catalog (445 runs of three or more frames within
 five seconds): one sweep accepted, 444 bursts and repeats refused. False
@@ -21,27 +28,21 @@ is a refusal.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import math
+import os
 
 from model import cache
+from stacks import _timed
 
 SWEEP_GAP = 5.0        # seconds between consecutive frames of one sweep
 LEAST = 3              # frames
+MOST = 36              # frames: three rows of twelve; a longer run is a burst or a timelapse
 OVERLAP_LEAST = 0.15
 OVERLAP_MOST = 0.65
-BURST = 0.85           # a median pair overlap past this is a burst, not a sweep
 WANDER = 20.0          # degrees of circular spread the direction may keep
 KEY = "orb1"           # the measure's version
-
-
-def _timed(when: str | None) -> dt.datetime | None:
-    if not when or len(when) < 19:
-        return None
-    try:
-        return dt.datetime.fromisoformat(when)
-    except ValueError:
-        return None
 
 
 def run_around(conn, photo_id: int) -> list[dict]:
@@ -135,17 +136,23 @@ def judge(frames: list[dict], tile_of) -> dict | None:
 
     import numpy as np
 
-    if len(frames) < LEAST:
+    if not LEAST <= len(frames) <= MOST:
         return None
-    features = [_features(tile_of(frame)) for frame in frames]
-    pairs = [pair(a, b) for a, b in zip(features, features[1:])]
-    if any(p is None or not p["verified"] for p in pairs):
-        return None
+    # One pair at a time, each gate as soon as it can be asked: a burst is
+    # refused at its first pair, before the rest of the run is read.
+    features = [_features(tile_of(frames[0]))]
+    pairs = []
+    for at in range(1, len(frames)):
+        features.append(_features(tile_of(frames[at])))
+        near = pair(features[at - 1], features[at])
+        if near is None or not near["verified"] or not OVERLAP_LEAST <= near["overlap"] <= OVERLAP_MOST:
+            return None
+        if at >= 2:
+            far = pair(features[at - 2], features[at])
+            if far is not None and far["overlap"] >= pairs[-1]["overlap"]:
+                return None
+        pairs.append(near)
     overlaps = [p["overlap"] for p in pairs]
-    if float(np.median(overlaps)) > BURST:
-        return None
-    if not all(OVERLAP_LEAST <= o <= OVERLAP_MOST for o in overlaps):
-        return None
     angles = np.radians([p["angle"] for p in pairs])
     spread = abs(np.mean(np.exp(1j * angles)))
     if math.degrees(math.sqrt(-2 * math.log(max(spread, 1e-9)))) > WANDER:
@@ -153,10 +160,6 @@ def judge(frames: list[dict], tile_of) -> dict | None:
     steps = [p["step"] for p in pairs]
     if np.std(steps) / max(float(np.mean(steps)), 1e-9) > 0.5:
         return None
-    for a, b, near in zip(features, features[2:], overlaps):
-        far = pair(a, b)
-        if far is not None and far["overlap"] >= near:
-            return None
     heading = math.degrees(math.atan2(float(np.mean(np.sin(angles))), float(np.mean(np.cos(angles)))))
     direction = ("left to right" if -45 <= heading < 45 else "top to bottom" if 45 <= heading < 135
                  else "right to left" if heading >= 135 or heading < -135 else "bottom to top")
@@ -164,26 +167,31 @@ def judge(frames: list[dict], tile_of) -> dict | None:
             "direction": direction}
 
 
-KIND = cache.Kind(name="sweep", compute=lambda source, hash: None, params=("model",), evictable=True)
+KIND = cache.Kind(name="sweep", compute=lambda source, hash: None, params=("model", "run"), evictable=True)
 
 
 def of(conn, tiles, photo_id: int) -> dict | None:
     """The sweep this photograph is in, or None: judged once per run and
-    kept as a cache row on the run's first frame, so the inspector's ask
-    costs a read after the first."""
+    kept as a cache row on the run's first frame keyed by the run's members,
+    so the inspector's ask costs a read after the first, and a run that
+    changes is judged again. Nothing is kept until every tile is there to
+    look at: a run the library has not drawn yet is not a refused one."""
 
     import render
 
     frames = run_around(conn, photo_id)
-    if len(frames) < LEAST:
+    if not LEAST <= len(frames) <= MOST:
         return None
     first = frames[0]["hash"]
-    recipe = {"model": KEY, }
+    recipe = {"model": KEY, "run": hashlib.sha1("".join(f["hash"] for f in frames).encode()).hexdigest()[:16]}
     held = cache.get(conn, first, KIND, recipe)
     if held is not None and held.get("state") == cache.READY:
         said = json.loads(held["value"]) if held.get("value") else None
         return said if said and int(photo_id) in said["members"] else None
-    verdict = judge(frames, lambda frame: tiles.path(frame["hash"], render.GRID))
+    tile_of = lambda frame: tiles.path(frame["hash"], render.GRID)  # noqa: E731
+    if not all(os.path.isfile(tile_of(frame)) for frame in frames):
+        return None
+    verdict = judge(frames, tile_of)
     if held is None:
         made = json.dumps(verdict, separators=(",", ":")) if verdict else ""
         cache.put(conn, first, KIND, cache.Made(value=made, bytes=len(made)), recipe)

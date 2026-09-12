@@ -93,7 +93,7 @@ def choose_band(mu, sigma, avoid, n, share=0.15):
     band = live[mu[live] >= cut]
     if len(band) < n:
         band = live[np.argsort(-mu[live])[: max(n * 2, 16)]]
-    order = band[np.lexsort((mu[band], -sigma[band]))]   # least-worn first
+    order = band[np.lexsort((mu[band], -sigma[band]))]   # most uncertain first
     fresh = order[: max(n * 3, 12)]
     fresh = fresh[np.argsort(mu[fresh], kind="stable")]
     if len(fresh) <= n:
@@ -132,18 +132,7 @@ def session(strategy, seed):
         else:
             mu, sigma, appearances = pool_state(conn, hashes)
             avoid = {index[h] for h in recent}
-            if strategy == "fisher":
-                # E4: the shipped mixture (teach by the widest window, find
-                # at the band's cut, a coin once there are leaders) with the
-                # fit's own uncertainty instead of 1/sqrt(1+rounds).
-                unsure = rank.fitted(rank.rounds(conn))[1]
-                sigma = np.asarray([unsure.get(h, 1.0 / np.sqrt(rank.LAM_B)) for h in hashes])
-                judged_n = int((appearances > 0).sum())
-                if judged_n >= 2 * SET and rng.random() < 0.5:
-                    members = choose_band(mu, sigma, avoid, SET)
-                else:
-                    members = choose_window(mu, sigma, avoid, SET)
-            elif strategy == "window":
+            if strategy == "window":
                 members = choose_window(mu, sigma, avoid, SET)
             elif strategy == "top":
                 covered = (appearances > 0).mean() > 0.95

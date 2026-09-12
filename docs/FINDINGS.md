@@ -762,6 +762,20 @@ finding was checked and the numbers said no.
 |---|---|---|---|
 | D1 | Thirteen lines could read "1 photographs" (the drag badge, the sidebar count, the import source and summary, a person's count, the search-kept notice, Empty Trash's notice, the selection heading); twenty more spelled their own plural | one word in the kit, `count(n, one, many)`, used by every surface that says how many | shipped |
 
+## Refutation of X115-X128 and PN1 (2026-09-12, by a third model)
+
+| # | Finding | Fix | Status |
+|---|---|---|---|
+| X149 | The sweep judge read every frame's features and every pair before any gate, on the library lane the inspector waits on: a 128-frame burst was ten seconds, the catalog's longest run (325 frames) a minute | one pair at a time, each gate as soon as it can be asked; a burst is refused at its first pair (two frames' features and one match); a run past MOST (36 frames) is refused unread. Measured on the owner's copy: every run of three or more (446) judged in 37 s, 82 ms each; the 325-frame run 0.01 s; the one sweep still found | shipped |
+| X150 | A run judged before its tiles were drawn was kept as "not a sweep" for good | nothing is kept until every tile is on disk; a run the library has not drawn is not a refused one | shipped |
+| X151 | The verdict was keyed on the run's first frame alone, so a frame rejected or brought in left a stale run: S could pull a trashed frame back into a stack | the recipe carries a digest of the run's members; a changed run is a miss and a fresh judgement | shipped |
+| X152 | `panorama._timed` took a date-only stamp (`… 00:00:00`) as a capture time, so 300 scans of one day were one run | `stacks._timed`, which refuses it, is the one clock | shipped |
+| X153 | `projection.project` committed inside its slices, so a cull verb's own commit and rollback governed nothing: an undo over two families could land half | an act's projection (`only`) commits nothing; the caller's commit lands decisions and projection together, its rollback undoes both; a whole-table rebuild still lands in slices | shipped |
+| X154 | Learn's uncertainty began as an empty dict, so until the lane's first fit (after the first sweep, minutes on a slow disk) every σ was "never judged" and Learn dealt the leaders | it begins as None; the first Learn draw makes the fit over the rounds alone once (310 ms on the owner's 4,308 rounds) and keeps it until the lane's own replaces it | shipped |
+| X155 | The BURST gate (median overlap > 0.85) could never be the refusing gate under OVERLAP_MOST 0.65 | deleted; the first pair's overlap refuses a burst | shipped |
+| X156 | `sim_learn`'s fisher lane was a second copy of the shipped mode with two different tie-breaks; the E4 numbers are the learn lane's, which calls the shipped mode | the fisher lane deleted; `choose_band`'s comment says what it sorts by | shipped |
+| X157 | An idle lane stepped every five seconds, and an idle step on a caught-up catalog walks every living row per kind (100 ms at 8k on the owner's copy, seconds at 150k): a core spent on nothing, per lane, forever (found by this session's bench while the refuter ran) | an idle lane sleeps until nudged -- a sweep, a look, an import, a drive coming or going (the follower nudges now) -- with a sixty-second clock as the safety net | shipped |
+
 ## Refutation of D1-D5, PF4, PF5, E2-3 (2026-09-12, by a second model)
 
 | # | Finding | Fix | Status |

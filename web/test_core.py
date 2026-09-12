@@ -1136,6 +1136,28 @@ class CullIsAReversibleDecision(CoreCase):
             {"picked.jpg": "trashed", "unflagged.jpg": "unflagged"},
         )
 
+    def test_a_verb_lands_whole_or_not_at_all(self):
+        # The decisions and their projection are one transaction: a verb
+        # that fails after its projection leaves neither (X153: the slice
+        # commits inside `project` once made the verb's rollback a no-op).
+        from unittest import mock
+
+        from model import projection
+
+        photo = self.add("frame.jpg", "d" * 64)
+        self.conn.commit()
+        real = projection.project
+
+        def project_then_fail(*args, **kwargs):
+            real(*args, **kwargs)
+            raise RuntimeError("the lights went out")
+
+        with mock.patch.object(projection, "project", project_then_fail):
+            with self.assertRaises(RuntimeError):
+                cull.reject(self.conn, (photo,))
+        self.assertEqual(self.conn.execute("SELECT status FROM images WHERE id = ?", (photo,)).fetchone()[0], "unflagged")
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM decisions WHERE subject = ?", ("d" * 64,)).fetchone()[0], 0)
+
     def test_a_later_decision_makes_an_old_undo_stale(self):
         photo = self.add("frame.jpg", "c" * 64)
         action = cull.reject(self.conn, (photo,))
