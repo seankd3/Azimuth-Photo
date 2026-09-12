@@ -5,7 +5,7 @@
 // around the cursor, a drag pans, Esc steps back to Fit before it closes,
 // and a turn is part of the same transform — the file is never rewritten.
 
-export function createLoupe({ stage, image, inset = () => 0, onTrouble = () => {} }) {
+export function createLoupe({ stage, image, inset = () => 0, onTrouble = () => {}, onShown = () => {} }) {
   const chip = document.createElement('button');
   chip.type = 'button';
   chip.className = 'loupe-zoom';
@@ -128,7 +128,7 @@ export function createLoupe({ stage, image, inset = () => 0, onTrouble = () => {
       }
     };
     if (image.complete && image.naturalWidth) settle();
-    image.onload = settle;
+    image.onload = () => { settle(); onShown(); };
     image.onerror = () => onTrouble();
   }
 

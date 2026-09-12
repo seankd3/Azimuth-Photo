@@ -297,11 +297,12 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 /* The status line at the sidebar's foot, the shell's own: the sidebar
    folds, the app's word about its work does not -- folded, it is a pill
    in the corner while there is work, and nothing when there is none. */
-.shell-foot { position: absolute; left: 0; bottom: 0; z-index: 3; width: var(--left); padding: 0 22px 14px; box-sizing: border-box; }
+.shell-foot { position: absolute; left: 0; bottom: 0; z-index: 3; width: var(--left); padding: 10px 22px 14px; box-sizing: border-box; background: var(--chrome); border-right: 1px solid var(--line); }
 .sidebar-status { margin: 0; color: var(--text-3); font-size: var(--t-meta); line-height: 1.45; }
-.hide-left .shell-foot { left: 12px; bottom: 12px; width: auto; padding: 5px 11px; border-radius: 999px; background: rgb(20 21 24 / 75%); }
+.hide-left .shell-foot { left: 12px; bottom: 12px; width: auto; padding: 5px 11px; border-radius: 999px; border: 0; background: rgb(20 21 24 / 75%); pointer-events: none; }
+.hide-left .shell-foot .status-stop { pointer-events: auto; }
 .hide-left .shell-foot:not(.is-working) { display: none; }
-.sidebar { padding-bottom: 72px; }
+.sidebar { padding-bottom: 96px; }
 
 .workspace { min-width: 0; min-height: 0; overflow: auto; background: #000; }
 .workspace, .sidebar, .inspector, .popover, .face-wall, .edit-groups {

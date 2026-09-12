@@ -785,6 +785,11 @@ finding was checked and the numbers said no.
 | LR16 | Space picks in Rank and the sheet said only Enter | Enter / Space | shipped |
 | LR17 | LR2's clear ran on the render N fires before Rank opens, so a survey never reached Rank (caught by this session's proof) | the survey is cleared only when the view leaves Rank or a look from it (`viewShown`); proven: N on three marked frames ranks "3 marked photographs", the All photographs door ends it | shipped |
 | LR18 | LR3's failed source was never cleared, so a source that later loaded would still wear the note | cleared with the loupe | shipped |
+| LR19 | Where the loupe returns to (`loupeReturnsTo`) outlived a loupe left by a chip or a name: later library loupes refused the arrows and Esc jumped into Rank | cleared by the render whenever the loupe is not up | shipped |
+| LR20 | The status line at the sidebar's foot had no background, so a scrolled sidebar's rows passed behind its words; folded, its pill covered the filmstrip's first cells and took their clicks | the foot wears the chrome; the pill takes no pointer (Stop does) | shipped |
+| LR21 | A source that failed once wore "cannot be shown" even after it loaded (a remade tile at the same path) | a load clears it (`onShown`) | shipped |
+| LR22 | Undo of a No restored the decision but the wall did not ask again until a later rewrite (the cached summary had dropped the pair) | the wall re-asks at once; the lane's next rewrite keeps it | shipped |
+| LR23 | `role=status` on Rank's progress spoke the whole sentence after every pick, on top of the pick's own sentence | dropped; the settings speak their word, the pick its name | shipped |
 
 ## Import and inspector (seventh round, 2026-09-12 night, audited by a second model)
 

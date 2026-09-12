@@ -288,7 +288,10 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
       // The one No on the wall has the way back every Yes has.
       undo.show(`“${pair.a.term}” and “${pair.b.term}” stay two people.`, async () => {
         await product.keepApart(pair.a.exemplar, pair.b.exemplar, false);
-        await renamed();
+        // The question is asked again at once; the lane's next rewrite
+        // keeps it, since the last word on the pair is no longer No.
+        maybe = [pair, ...maybe.filter((m) => m !== pair)];
+        renderWall(read().people || []);
       });
     } catch (error) {
       notify(why(error));

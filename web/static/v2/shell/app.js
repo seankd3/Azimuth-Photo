@@ -68,6 +68,10 @@ const loupeView = createLoupe({
     // itself, and the render keeps the explanation until the source moves.
     update({ troubled: loupeImage.dataset.source || null });
   },
+  onShown: () => {
+    // A source that loads is not troubled, whatever it did before.
+    if (read().troubled) update({ troubled: null });
+  },
 });
 
 // The chrome folds, LRC-style: each panel gives its edge to the
@@ -1863,6 +1867,8 @@ function render(state) {
   // The merge stands in only while the loupe is up: a chip, a name, a
   // folder or an album can leave the loupe without closing it.
   if (state.view !== 'loupe' && state.merged) { update({ merged: null }); return; }
+  // Where the loupe returns to is a fact about the loupe that is up.
+  if (state.view !== 'loupe') loupeReturnsTo = null;
   // A survey is Rank's own round: it ends when the view leaves Rank (or a
   // look taken from it), whichever door was used. Leaves: N sets the
   // survey a moment before Rank opens, and that is not a leaving.
