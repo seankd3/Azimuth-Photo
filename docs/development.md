@@ -80,7 +80,8 @@ does:
 - `scripts/cloud-setup`: the setup above on Linux (Python 3.12 named
   outright, since the container's default may be older), `npm install`, and
   `python scripts/make_test_library.py`, which builds the development archive
-  from public-domain photographs in seconds. A Claude Code session runs it
+  from public-domain photographs in seconds (`--large` for the thousands a
+  performance round wants; built once per container). A Claude Code session runs it
   before the first prompt (`.claude/hooks/session-start.sh`); a Codex
   environment names it as its setup script. Nothing of the owner's archive
   is needed or reachable.
@@ -160,11 +161,15 @@ browser to read them. With no folder named the harness is exactly as it was.
 
 `sim_rank.py` and `sim_learn.py` are the instruments the ranking modes were
 chosen with; `make_test_library.py` builds the development archive on fast
-disk instead of the real one: thirty-one public-domain photographs from the
-Library of Congress, pinned by SHA-256, in the three-root date-folder shape,
-with known capture dates, a duplicate pair, a nested folder and an undated
-frame (`--dest` or `AZIMUTH_TEST_LIBRARY` says where; `PROVENANCE.md` in the
-library root names each one's source and rights).
+disk instead of the real one, from the manifest `scripts/test_library.tsv`
+(pinned by `scripts/pin_test_library.py`): public-domain photographs from the
+Library of Congress, each pinned by SHA-256, in the root date-folder shape.
+The small tier (the default, two seconds) is thirty-one frames with known
+capture dates, a duplicate pair, a nested folder and an undated frame; the
+large tier (`--large`, minutes) is thousands more across 1860-1944 with
+bursts and film rolls, for development, the proofs and `scripts/bench.py`.
+`--dest` or `AZIMUTH_TEST_LIBRARY` says where; `PROVENANCE.md` in the library
+root names each one's source and rights.
 
 ## Build the app
 
