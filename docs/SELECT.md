@@ -172,8 +172,8 @@ the test of the design is that none ever will.
 
 Three budget rules in all (a number, a floor per chapter, coverage), one
 chosen when the select is opened and shown on the count line. A smart
-album is a select that has not been edited yet, and stays alive as new
-photographs match its rule.
+album is a select that has not been edited yet; what it does as new
+photographs match its rule is the standing question below.
 
 **A worked example.** A long trip: two coasts, a city, three days in the
 mountains, an engagement on the last summit. Round one walks a few hundred
@@ -198,24 +198,76 @@ swaps teach it; no one names the difference.
 | A family across decades | the same people at the same events, years apart | as the person swaps | a person's life, scope one chip |
 | Client proofing | as the delivery | as the client marks | the contact sheet goes out numbered; the marks come back as decisions with the client as author, which the log already allows |
 
-## Where the computer beats the desk
+## How the machine earns its place
 
-- **Exhaustive comparison.** Every kept frame against every other for
-  likeness. Sixty prints on a floor hide pairs; six hundred cannot be laid
-  out.
-- **Work done before the person sits down.** Scenes and leads are made on
-  the chore lane, as tiles are, the night the card is imported. The pass
-  opens with the doubtful scenes ready and the sure ones settled under the
-  tilde; no one watches it think.
-- **Preview of a decision.** Type a different budget and the wall dims what
-  would go before anything goes. A number, not a knob; the cut stays the
-  person's.
-- **Consistency**, across three thousand frames and across selects: the
-  head that learned last month's leads proposes this month's.
-- **Seeing what a thumbnail hides**: a blink in a background face, a focus
-  miss at 100%, the same frame filed twice on two drives.
-- **Counting**: the budget, the coverage, the alike pairs, the scenes left;
-  always current, never a chore.
+Sean, 09-13: "how can we best leverage the computer and cutting edge
+software to best serve users?"
+
+The fashionable answer is more model. The useful answer is six older
+ideas, and one test for when a model is the right tool at all.
+
+**Do what is cheap for a machine and dear for a person.** Counting,
+remembering, exhaustive comparison, vigilance that never tires. A person
+laying sixty prints on a floor cannot see every pair; six hundred cannot be
+laid out at all. The machine compares every kept frame to every other and
+never gets bored at frame two thousand. It should never be asked to judge,
+which is cheap for the person and impossible for it.
+
+**Move every cost to before the sitting.** The largest lever in this app is
+not a model, it is the scheduler. Scenes, leads, likeness and facets are
+made on the chore lane the night a card is imported, as tiles already are.
+When the person opens the pass, the doubtful scenes are ready and the sure
+ones are settled under the tilde. Nobody watches it think.
+
+**Latency is not a metric, it is whether a thought survives.** Under a
+tenth of a second the person's attention stays on the photograph; over a
+second it moves to the tool, and the edit becomes software operation. This
+is why Photo Mechanic, which has no intelligence of any kind, still beats
+every clever thing in the field for the first pass
+(`docs/culling-market-research.md`). Being instant is the intelligence a
+person feels.
+
+**Every decision must make the next one better, forever.** Most software
+treats a sitting as disposable: the picks are an output, and next month
+starts from nothing. Here the rounds are the asset and everything else is
+derived. The head that learned a person's leads last month proposes this
+month's; a select's swaps sharpen it inside the select; ten years of
+sittings compound into something no new tool can hand anyone. This is the
+whole return on the work, and it exists only because decisions are kept as
+decisions rather than as scores.
+
+**Decisions durable, computations rebuildable** is also how the app stays
+current without churn. A better encoder arrives next year: swap it, refit
+the same rounds against the new space, and every past judgement still
+counts. Had the app stored scores instead of rounds, it could never take
+the upgrade without losing the person's history. Being able to replace the
+model is worth more than having the newest one.
+
+**Local is no longer a trade.** The encoder, the faces and the sharpness
+read all fit on a modest card; privacy costs nothing now, and the research
+shows client RAWs in the cloud is a live worry across the field. Nothing
+leaves the machine.
+
+### The test for a model
+
+Does the question belong to the photograph or to the person?
+
+| Question | Belongs to | Answered by |
+|---|---|---|
+| What is in this frame? Who? Where? | the photograph | a model, well |
+| Is it sharp, are the eyes open, is it exposed? | the photograph | a model, well |
+| What is this frame like? Which frames are the same subject? | the photograph | the embedding space |
+| Which of these is better? What is worth keeping? | the person | the rounds, only |
+| What should come after what? | the person | nobody but them |
+
+Every tool that answered a person-question with a model produced the
+field's universal complaint, the false reject of a keeper. The four places
+image understanding earns its keep here are all photograph-questions:
+making a scene a subject rather than a burst, distinctness across a whole
+select, the shape of what is kept (shown as the frames themselves, grouped:
+"fourteen of these twenty are the same golden field"), and coverage against
+a list's words. The space knows what a photograph is of and what it is
+like. It never knows what it is worth.
 
 ## The list
 
@@ -226,6 +278,92 @@ shows which lines have a kept frame and which have none. Search reused,
 the practice itself, and coverage turned from a count into the answer a
 client will ask for. It joins because it is the rule applied to a list
 the person already keeps, not a feature beside it.
+
+## Where a comparison pays: the boundary
+
+Sean, 09-13: "does our ranking mode improve the efficiency of this sort of
+work?"
+
+Honestly: for a delivery, no, and it would make it slower. Rank produces an
+ordering, and an ordering costs many rounds per photograph to settle. A
+delivery does not need an order. It needs one decision per scene against a
+threshold, which is one pass. Spending Rank rounds on three thousand frames
+to learn that frame 1,400 outranks frame 1,900, when both are delivered and
+neither is ever looked at again, is work with no answer attached.
+
+For a portfolio, the opposite: comparison is the only instrument that
+works. Twenty from a lifetime cannot be chosen by a threshold, because no
+absolute score is trustworthy at that precision, and the practice agrees
+(the sources reject "rate this" and keep "this or that"). There the order
+*is* the product.
+
+So the rule, which is decision theory and not a preference:
+
+**A comparison is worth exactly what it changes. Spend rounds at the
+boundary.**
+
+Every select has a boundary: the budget's last slot. Frames far above it
+are kept whatever happens; frames far below it are out whatever happens;
+comparisons among either are information the select cannot use. The frames
+that straddle the line are the only ones whose order decides anything, and
+the fit already knows which they are: it scores every photograph and says
+how unsure it is of each (`fitted` in `web/rank.py` returns both).
+
+This gives Rank one new mode and makes it the engine of the whole
+workspace rather than a game beside it:
+
+| Mode | Seats | Serves |
+|---|---|---|
+| `learn` (today) | where the fit is most unsure | taste, before any select exists |
+| `tournament` (today) | the highest-rated judged frames | finding the very top |
+| **`bubble`** (new) | the frames whose scores straddle the budget's last slot, most unsure first | every select, at the only place an answer changes |
+
+The bubble is a scope, not a strategy: `candidates(..., mode="bubble")`
+over the select's kept-and-near-kept band. A round from it is a round in
+the same log, fitted by the same head. Nothing else about Rank changes.
+
+What this buys, by shape:
+
+- **A delivery** spends no rounds at all by default. The pass settles it;
+  the bubble is offered only when the count is over budget and the person
+  wants the cut decided rather than taken by rule.
+- **A portfolio** is almost entirely bubble rounds: twenty slots, a
+  thousand candidates, and every round is a duel at the line. This is the
+  one shape where Rank *is* the workspace.
+- **A subject album or a review** sits between: a pass for redundancy,
+  then a handful of bubble rounds where the floor per chapter bites.
+
+## A select is a standing question
+
+Sean, 09-13: "cultivating regular commercial work, and reflective lifetime
+portfolios, and subject based currated albums... thinking about the
+dynamic/smart collections, what's the optimal shape here?"
+
+The shape is one spectrum, not three kinds of thing. Membership can be
+decided by hand, by rule, by rule with exceptions (`docs/ORGANIZING.md`'s
+pins and exclusions), or by rule and then edited down. That last one is a
+select. So:
+
+**A select is a smart album that has been edited, and it stays alive.**
+
+Its scope is a rule, so new photographs match it as they arrive. What
+arrives does not silently join the kept set and does not silently vanish:
+it arrives at the boundary. A new frame whose score clears the weakest
+keeper is **a challenger**, and the select says so quietly in the sidebar
+("Portfolio · 1 challenger"). One key opens a duel between the challenger
+and the frame it threatens; the winner is kept, and the round is a round.
+That is the whole mechanism, and it is the same boundary again.
+
+This is what separates the three kinds of work without three designs:
+
+| Work | Its boundary | After the first pass |
+|---|---|---|
+| **Commercial delivery** | coverage, every scene represented | finished; archived with the job. Challengers are meaningless once delivered, so a delivered select is closed and says so |
+| **Lifetime portfolio** | the twentieth slot | never finished. Standing forever, challengers arrive with every shoot, the fit sharpens with every duel |
+| **Subject album** | a number or coverage | standing, refreshed as the person or label gains photographs; unwalked scenes queue at the end of the spine |
+
+One noun, one pass, one boundary, three lifetimes. A delivery closes, a
+portfolio never does, a subject album waits.
 
 ## The same rule culls
 
@@ -311,13 +449,23 @@ lands as its own pull request.
 2. **The pass and the second look**: a select is an album with a budget
    rule and a round.
 3. **The guard and the budget**: alike across the select, the count line,
-   the offered cuts, coverage, and with it the cull.
+   the offered cuts, coverage, and with it the cull. The budget defines the
+   boundary everything after this leans on.
 4. **The wall, cut again, the contact sheet.**
 5. **Chapters and beats** on the margin.
 6. **Learning inside the select**: the head refit between chapters,
    measured as held-out accuracy on the person's own swaps
    (`scripts/sim_learn.py`'s way). The one step with a number to earn.
-7. **The cover, and export in order.**
+7. **The bubble**: `candidates(mode="bubble")` seats the frames straddling
+   the budget's last slot, most unsure first. Measurable before it ships,
+   `scripts/sim_learn.py`'s way: rounds spent at the boundary against rounds
+   spent by `learn`, scored on how often the final kept set changes. A mode
+   that does not change the set faster than the one it replaces does not
+   ship.
+8. **The standing select**: a challenger at the boundary when new work
+   matches the scope, one key to duel it against the frame it threatens; a
+   delivery closes instead.
+9. **The cover, and export in order.**
 
 ## Sources
 
