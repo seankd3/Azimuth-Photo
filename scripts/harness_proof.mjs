@@ -6,6 +6,12 @@
 // behaviour rather than pixels.
 //
 //   node scripts/harness_proof.mjs <out.png> [--probe a.js ...] [--gap 1.5] [--size 1366x768]
+//                                  [--tiles DIR] [--friction]
+//
+// --tiles hands the harness a folder of real photographs to draw with, so a
+// capture shows pictures and a decode costs what it costs; --friction turns
+// the friction meter on in the page (`window.__friction`), so a probe can
+// read what each act cost.
 //
 // Each probe is JavaScript evaluated in the page, in order with --gap seconds
 // between them so one may act and the next may read what happened. A page
@@ -22,16 +28,18 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PAGE = path.join(ROOT, 'build', 'harness.html');
 
 function parse(argv) {
-  const args = { out: '', probes: [], gap: 1.5, size: [1366, 768] };
+  const args = { out: '', probes: [], gap: 1.5, size: [1366, 768], tiles: '', friction: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--probe') args.probes.push(argv[++i]);
     else if (arg === '--gap') args.gap = Number(argv[++i]);
     else if (arg === '--size') args.size = argv[++i].split('x').map(Number);
+    else if (arg === '--tiles') args.tiles = argv[++i];
+    else if (arg === '--friction') args.friction = true;
     else if (!args.out) args.out = arg;
     else throw new Error(`unexpected argument ${arg}`);
   }
-  if (!args.out) throw new Error('usage: harness_proof.mjs <out.png> [--probe a.js ...] [--gap s] [--size WxH]');
+  if (!args.out) throw new Error('usage: harness_proof.mjs <out.png> [--probe a.js ...] [--gap s] [--size WxH] [--tiles DIR] [--friction]');
   return args;
 }
 
@@ -52,19 +60,22 @@ function browser() {
 
 async function main() {
   const args = parse(process.argv.slice(2));
-  const built = spawnSync(python(), [path.join(ROOT, 'scripts', 'harness.py'), '--build'], { stdio: 'inherit' });
+  const build = [path.join(ROOT, 'scripts', 'harness.py'), '--build'];
+  if (args.tiles) build.push('--tiles', args.tiles);
+  const built = spawnSync(python(), build, { stdio: 'inherit' });
   if (built.status !== 0) throw new Error('the harness page did not build');
 
   const launched = await chromium.launch({ headless: true, executablePath: browser(), args: ['--no-sandbox'] });
   const page = await launched.newPage({ viewport: { width: args.size[0], height: args.size[1] } });
   const errors = [];
   page.on('pageerror', (error) => errors.push(String(error)));
-  // The harness has no tiles on purpose, so an image that fails to load is
-  // the page working as built; an error the UI's own code raises is not.
+  // The harness has no tiles unless a folder was named, so an image that
+  // fails to load is the page working as built; an error the UI's own code
+  // raises is not.
   page.on('console', (message) => {
     if (message.type() === 'error' && !message.text().startsWith('Failed to load resource')) errors.push(message.text());
   });
-  await page.goto(pathToFileURL(PAGE).href, { waitUntil: 'load' });
+  await page.goto(pathToFileURL(PAGE).href + (args.friction ? '?friction' : ''), { waitUntil: 'load' });
   await page.waitForTimeout(args.gap * 1000);
   for (const name of args.probes) {
     const result = await page.evaluate(readFileSync(name, 'utf8'));

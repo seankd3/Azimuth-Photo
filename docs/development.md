@@ -139,6 +139,26 @@ touch the screen:
   `native_proof.py` to a screenshot; the gallery is read side by side with the
   last round's, never diffed.
 
+Two instruments for how the app *feels*, since a proof that only reads the DOM
+cannot wince. The friction meter (`web/static/v2/kit/friction.js`) records every
+key and click — the wait to the first change and to the paint, the nodes added
+and removed for it, the animations started, long tasks, layout shifts and
+console errors — and keeps the last forty at `window.__friction` (`acts()`,
+`clear()`, `mark(note)`). It is off unless asked for: `localStorage`
+`azimuth.friction` = `'1'` in the window, `?friction` on the harness page
+(`harness_proof.mjs --friction`); off, nothing is observed. In the window,
+**Ctrl+Shift+W** at the moment something feels wrong writes the wince and the
+ten acts behind it to the log under the home, so the feeling arrives with its
+numbers. And `harness.py --tiles DIR` (or `AZIMUTH_HARNESS_TILES`, forwarded by
+`harness_proof.mjs --tiles DIR`) draws the fake library from a folder of real
+photographs instead of nothing, so a capture shows pictures and a decode costs
+what it costs; the files are handed out in sorted order, the same one to the
+same photograph every run, and the page must be opened as a file for the
+browser to read them. With no folder named the harness is exactly as it was.
+
+    node scripts/harness_proof.mjs out.png --tiles ~/photos --friction \
+      --probe scripts/journeys/cull.js
+
 `sim_rank.py` and `sim_learn.py` are the instruments the ranking modes were
 chosen with; `make_test_library.py` builds the development archive on fast
 disk instead of the real one, from the manifest `scripts/test_library.tsv`

@@ -22,6 +22,13 @@ import { presence } from '../kit/presence.js';
 import { icon } from '../kit/icons.js';
 import { createTimeline } from './timeline.js';
 import { numbered } from '../kit/words.js';
+import { friction } from '../kit/friction.js';
+
+// The meter for how the app feels, when it is asked for. It watches every
+// key and click and keeps the last forty with their numbers; Ctrl+Shift+W
+// puts the ten behind a wince in the log. Off, it is a null and costs
+// nothing.
+const wince = friction();
 
 // A fault on the page is read the same way as a fault in the product:
 // written to the log under the home. The document keeps them (v2.html,
@@ -2053,6 +2060,18 @@ document.addEventListener('keydown', (event) => {
   // for two days a focused cell swallowed X, P and the arrows.
   const onControl = Boolean(target.closest('button'))
     && !target.closest('.photo-grid, .rank-stage, .loupe-stage, .face-wall, .import-stage');
+  if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'w') {
+    // A wince is evidence. Pressed the moment something feels wrong, it
+    // writes the moment and the ten acts behind it to the log under the
+    // home, so the feeling can be read later with its numbers beside it
+    // instead of remembered. Heard before anything else, dialogs and text
+    // fields included: a wince is never about what has the keyboard.
+    event.preventDefault();
+    const said = JSON.stringify({ wince: Math.round(performance.now()), acts: (wince?.acts() || []).slice(-10) });
+    product.report(said).catch(() => {});
+    notify(wince ? 'Noted the wince.' : 'The friction meter is not on.');
+    return;
+  }
   // A modal is the first rung, whichever it is: Esc closes it and nothing
   // behind it hears the key. The home dialog alone cannot be dismissed.
   const modal = document.querySelector('dialog[open]');
@@ -2412,6 +2431,7 @@ const SHORTCUTS = [
   ['Everywhere', [
     ['?', 'This sheet'], ['/', 'Search'], ['>', 'In the search box: every verb on the screen'], ['F6', 'The chrome: bar, sidebar, details, top bar'], ['Tab', 'Fold the side panels', ['toggle-left', 'toggle-right']], ['Shift+Tab', 'Fold everything', ['toggle-top']],
     ['Esc', 'Back one step'], ['Ctrl+Z', 'Undo', ['undo-toast']], ['Ctrl+A', 'Select all'], ['L', 'Lights out'],
+    ['Ctrl+Shift+W', 'Note a wince'],
   ]],
   ['The grid', [
     ['Arrows', 'Move the cursor'], ['Shift+Arrows', 'Extend the selection'], ['Home / End', 'First / last'],
