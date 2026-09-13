@@ -108,8 +108,12 @@ without a question, wearing the tilde, and appear on the wall like any
 other kept frame, one key to reopen. The count line says how much needs a
 person ("42 scenes need you; 258 are settled ~"), and the pass ends when
 the doubt does, not when the scenes do. One scene at a time: the lead
-large, the scene's other frames as a numbered strip beneath. Every act one
-key, no act waits.
+large, the scene's other frames as a numbered strip beneath, and, when
+the scene has faces, a face row: every detected face at once with its eyes
+and sharpness read, which the faces and sharpness passes already produce,
+so a group is judged without zooming (the one AI-era surface every
+reviewer of every tool praises; `docs/culling-market-research.md`). Every
+act one key, no act waits.
 
 | Key | Act |
 |---|---|
@@ -258,6 +262,22 @@ and the book dummy are the practice this serves instead.
 
 Nothing new is inferred.
 
+## What the market says
+
+Five sourced research passes over the culling tools and their users are
+digested in `docs/culling-market-research.md`. What they settle here:
+never mark a frame bad (the universal complaint is the false reject of a
+keeper); sell the redundancy pass, not the judgment pass (a working
+reviewer measured Aftershoot's saving at "5 to 10 percent" because "it
+does not understand where the emotion is"); the second look is how every
+tool is actually used; the speed of the pass is the first praise and the
+first complaint of every tool; one flag and one reject, no stars, is what
+both hand methods teach; marks must never vanish (Lightroom's silently
+reverting stars are a top complaint); local, always; and learning which
+frame a person keeps is the empty seat in the whole table. Two changes to
+this design came from it: the face row in the pass, and client marks
+returning as decisions.
+
 ## Deliberate rejections
 
 - **A quality score on every frame**: deleted once already; facets are facts
@@ -267,8 +287,10 @@ Nothing new is inferred.
 - **Automatic selects**: opened, walked and finished by a person; the
   machine's job is to make the walk short.
 - **A second curator inside the app**: the contact sheet gives a second
-  pair of eyes anywhere; a second author on the log is machinery for a rare
-  case.
+  pair of eyes anywhere. Its numbers coming back as decisions with the
+  client as author is not this: it is a plain import of marks, the
+  practice's missing half (every proofing platform is one-way), and the
+  log already allows it.
 - **Bells**: rhythm marks, captions, a place noticed across two selects, a
   select from a sentence. Each occasionally useful, none the rule, each a
   surface to maintain (the owner, 09-13: "elegance not occasionally useful
