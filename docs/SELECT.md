@@ -29,7 +29,10 @@ something below.
 3. **Attention is the scarce resource, so ask only what the machine cannot
    answer.** Where the fit is sure of a scene's lead and the rest is
    redundant, the scene is settled without a question, wearing the tilde,
-   visible on the wall and reversible. The pass asks in order of doubt and
+   visible on the wall and reversible. Sureness cuts both ways: a scene
+   whose best frame is nowhere near the budget is settled out by the same
+   silence, and shows up on one screen at the end rather than as three
+   hundred questions. The pass asks in order of doubt and
    says how much is left: "42 scenes need you; 258 are settled ~". Three
    thousand frames become an hour of real decisions.
 4. **The machine remembers, counts and notices; the person composes.**
@@ -105,7 +108,8 @@ scene the person marks, not a noun. The vocabulary of the canon is kept
 whose lead the fit is unsure of, or whose frames the space calls different,
 come first; scenes whose lead stands clear of a redundant rest are settled
 without a question, wearing the tilde, and appear on the wall like any
-other kept frame, one key to reopen. The count line says how much needs a
+other kept frame, one key to reopen; scenes whose best frame is far under
+the budget are settled out the same way and wait on one screen at the end. The count line says how much needs a
 person ("42 scenes need you; 258 are settled ~"), and the pass ends when
 the doubt does, not when the scenes do. One scene at a time: the lead
 large, the scene's other frames as a numbered strip beneath, and, when
@@ -341,6 +345,19 @@ workspace rather than a game beside it:
 | `learn` (today) | where the fit is most unsure | taste, before any select exists |
 | `tournament` (today) | the highest-rated judged frames | finding the very top |
 | **`bubble`** (new) | the frames whose scores straddle the budget's last slot, most unsure first | every select, at the only place an answer changes |
+
+The boundary settles the pass as well as the rounds, and it settles in
+both directions. A scene whose best frame stands clear above the line is
+settled in. A scene whose best frame falls far under it is settled out —
+not rejected, not marked, simply never asked about, and waiting on the
+what's-missing screen with its highest-scoring frame showing, one key to
+admit it. This is the honest answer to what photographers actually
+complain about, which is not tools that reject too much but tools that
+"couldn't even consistently get rid of the pictures of the floor". The
+frame of the floor is a scene of one and its best frame is the floor: the
+machine never calls it bad, and the budget never had room for it. Scarcity
+is what does the rejecting, which is why a select with no budget settles
+nothing out and shows the person everything.
 
 The bubble is a scope, not a strategy: `candidates(..., mode="bubble")`
 over the select's kept-and-near-kept band. A round from it is a round in
