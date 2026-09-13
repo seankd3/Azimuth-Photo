@@ -961,3 +961,9 @@ The first round run by the `polish` workflow from a cloud session: eight scouts,
 | # | Finding | Fix | Status |
 |---|---|---|---|
 | FR1 | "any of the slightest friction, ugly ux, lag, etc etc, how can we sniff those things out better?" — nothing measured what an act costs: a probe reads the DOM after the fact, so a wait, a rebuilt grid, a lurch or an animation storm left no trace, and the harness drew black tiles, so no proof ever paid for a decode | a friction meter (`web/static/v2/kit/friction.js`) records every key and click — the wait to the first change and to the paint, the nodes added and removed, the animations started, long tasks, layout shifts and console errors — keeps the last forty at `window.__friction`, and Ctrl+Shift+W writes a wince and the ten acts behind it to the log under the home; the harness draws real photographs when a folder is named (`harness.py --tiles`, `harness_proof.mjs --tiles/--friction`). Measured over every journey: the pass key V rebuilds 134 nodes and shifts the layout 0.056, S on a marked set 126, N 59, the face wall's arrow 70, and a Rank pick on real photographs changes in 7 ms and paints in 12 with 9 animations | shipped |
+
+## Rounds that did not finish (2026-09-13)
+
+| # | Finding | Fix | Status |
+|---|---|---|---|
+| RD1 | The journeys round (workflow `wf_95a06869-424`) stalled: six scouts started, four returned, and the journal recorded nothing further after 01:31Z, frozen on `survey:the-second-sitting`. The session was later compacted and the task list went with it, so the four completed scouts' findings were never read and cannot be recovered | nothing to integrate; re-run the round from the start when the design work pauses, and treat a lens with no journal progress for thirty minutes as dead rather than slow — a stalled round is worth stopping early, because its completed scouts are only salvageable while the task list lives | open |

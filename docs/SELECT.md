@@ -29,7 +29,10 @@ something below.
 3. **Attention is the scarce resource, so ask only what the machine cannot
    answer.** Where the fit is sure of a scene's lead and the rest is
    redundant, the scene is settled without a question, wearing the tilde,
-   visible on the wall and reversible. The pass asks in order of doubt and
+   visible on the wall and reversible. Sureness cuts both ways: a scene
+   whose best frame is nowhere near the budget is settled out by the same
+   silence, and shows up on one screen at the end rather than as three
+   hundred questions. The pass asks in order of doubt and
    says how much is left: "42 scenes need you; 258 are settled ~". Three
    thousand frames become an hour of real decisions.
 4. **The machine remembers, counts and notices; the person composes.**
@@ -105,7 +108,8 @@ scene the person marks, not a noun. The vocabulary of the canon is kept
 whose lead the fit is unsure of, or whose frames the space calls different,
 come first; scenes whose lead stands clear of a redundant rest are settled
 without a question, wearing the tilde, and appear on the wall like any
-other kept frame, one key to reopen. The count line says how much needs a
+other kept frame, one key to reopen; scenes whose best frame is far under
+the budget are settled out the same way and wait on one screen at the end. The count line says how much needs a
 person ("42 scenes need you; 258 are settled ~"), and the pass ends when
 the doubt does, not when the scenes do. One scene at a time: the lead
 large, the scene's other frames as a numbered strip beneath, and, when
@@ -168,6 +172,13 @@ rather than at the beginning, and an unwalked scene is not a rejected one.
 groups become the scenes, and the pass runs over them. The select remembers
 which cut it is on and where the person stopped. Every cut is kept; "back a
 cut" is one act.
+
+This is where the star workflow's *maybe* lives. The photographers who
+still rate are mostly carrying one thing a flag cannot: one star on the
+first pass, four on the second, the middle mark meaning "not yet". A frame
+kept in the first cut is exactly that mark — in, and not yet judged
+against the rest — and the second cut is the second pass. The design owes
+the reader that sentence, not a rating.
 
 **The contact sheet** is the wall as one numbered sheet, exported for a
 second pair of eyes anywhere. **The cover** is proposed as the highest-rated
@@ -335,6 +346,19 @@ workspace rather than a game beside it:
 | `tournament` (today) | the highest-rated judged frames | finding the very top |
 | **`bubble`** (new) | the frames whose scores straddle the budget's last slot, most unsure first | every select, at the only place an answer changes |
 
+The boundary settles the pass as well as the rounds, and it settles in
+both directions. A scene whose best frame stands clear above the line is
+settled in. A scene whose best frame falls far under it is settled out —
+not rejected, not marked, simply never asked about, and waiting on the
+what's-missing screen with its highest-scoring frame showing, one key to
+admit it. This is the honest answer to what photographers actually
+complain about, which is not tools that reject too much but tools that
+"couldn't even consistently get rid of the pictures of the floor". The
+frame of the floor is a scene of one and its best frame is the floor: the
+machine never calls it bad, and the budget never had room for it. Scarcity
+is what does the rejecting, which is why a select with no budget settles
+nothing out and shows the person everything.
+
 The bubble is a scope, not a strategy: `candidates(..., mode="bubble")`
 over the select's kept-and-near-kept band. A round from it is a round in
 the same log, fitted by the same head. Nothing else about Rank changes.
@@ -402,7 +426,8 @@ is mostly sequences.
 It proposes leads and wears the tilde until a key. It keeps count against
 the budget and watches for alike across the whole select. It learns from
 swaps with the head Rank already has. It never orders beyond time, never
-marks a frame bad, never finishes a select. Google's Memories and Apple's
+marks a frame bad — an absolute verdict is a claim about the photograph
+that only its owner can make — and never finishes a select. Google's Memories and Apple's
 Trips build the whole thing unasked and cannot be corrected; the floor edit
 and the book dummy are the practice this serves instead.
 
@@ -422,19 +447,35 @@ Nothing new is inferred.
 
 ## What the market says
 
-Five sourced research passes over the culling tools and their users are
-digested in `docs/culling-market-research.md`. What they settle here:
-never mark a frame bad (the universal complaint is the false reject of a
-keeper); sell the redundancy pass, not the judgment pass (a working
-reviewer measured Aftershoot's saving at "5 to 10 percent" because "it
-does not understand where the emotion is"); the second look is how every
-tool is actually used; the speed of the pass is the first praise and the
-first complaint of every tool; one flag and one reject, no stars, is what
-both hand methods teach; marks must never vanish (Lightroom's silently
-reverting stars are a top complaint); local, always; and learning which
-frame a person keeps is the empty seat in the whole table. Two changes to
-this design came from it: the face row in the pass, and client marks
-returning as decisions.
+Five sourced research passes over the culling tools and their users, and
+296 comments of photographers talking to each other, are digested in
+`docs/culling-market-research.md`. What they settle here: sell the
+redundancy pass, not the judgment pass — one photographer's own account
+puts the reliable saving at about thirty percent of duds, while getting
+"down to an actual 'final cull' has been extremely unreliable"; the second
+look is how every tool is actually used, and no one in 286 comments
+describes trusting a blind export; the speed of the pass is the first
+praise and the first complaint of every tool; one flag and one reject, no
+stars, is what both hand methods teach, and the cut carries the maybe the
+stars were carrying; marks must never vanish (Lightroom's silently
+reverting stars are a top complaint); local, always — a grievance now
+rather than a preference, since a competitor's own terms reserve the right
+to train on the photographs its marketing says stay home; and learning
+which frame a person keeps is contested rather than empty, which changes
+what is worth earning from being first to learn to being first whose
+learning is legible.
+
+One conclusion survived the comments but lost its reason. The false reject
+of a keeper — the deliberate blur, the closed eye that carries the moment —
+is what every review says AI culling gets wrong, and it is what this design
+first cited for never marking a frame bad. In 286 comments of working
+photographers it does not appear at all; what they report is the opposite,
+tools that will not even discard the frames of the floor. The rule stands
+on the ground above, and under-rejection is an argument for the cull and
+the redundancy pass rather than against them.
+
+Two changes to this design came from the research: the face row in the
+pass, and client marks returning as decisions.
 
 ## Deliberate rejections
 

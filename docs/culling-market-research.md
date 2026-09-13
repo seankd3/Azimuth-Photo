@@ -11,13 +11,20 @@ This is the digest. Every number carries its source; ~ marks a claim that
 could not be confirmed against a primary source, and vendor benchmarks are
 named as such. What it decides for the design is in `docs/SELECT.md`.
 
-**One gap, stated plainly.** Reddit (r/WeddingPhotography, r/photography,
-r/Lightroom) and the DPReview forum bodies were unreachable from this
-container (403 or not indexed), in all five passes. Community voice below
-comes from Trustpilot, Adobe Community, Fstoppers, PetaPixel, Shotkit,
-pixls.us, MacRumors and photographers' blogs. The Reddit threads should be
-read by hand at the next sitting; the direction of what is here is
-unlikely to reverse, but the quotes would be sharper.
+**How the community voice was gathered.** Reddit itself answers 403 from
+this container, but the Arctic Shift archive serves the same comments. Two
+traps on the way: a page of 50 exceeds the archive's own query timeout and
+fails with a message that says "slow down", which sends you to the wrong
+fix (25 returns in six seconds); and a rare term in a large subreddit can
+still exceed it however small the page, so a handful of combinations
+return nothing at all. 296 unique comments were read, 286 substantive,
+dated 2026-01 to 2026-09, from r/WeddingPhotography (117), r/Lightroom
+(71), r/photography (47), r/AskPhotography (25), r/sportsphotography (25)
+and r/photographer (1), on the terms aftershoot, cull, culling and photo
+mechanic. The DPReview forum bodies are still unread. What that material
+says is in "What photographers say, in their own words" below, and it
+**contradicts** one of this document's conclusions, which is recorded
+there rather than quietly corrected.
 
 ## The tools
 
@@ -50,7 +57,7 @@ Ranked by how many independent sources carried the theme.
 
 **Complaints**
 
-1. **The false reject of a keeper** (every AI tool): shallow depth of field, intentional motion blur, a small subject in blurry foreground, a deliberately closed eye, a squint in bright light. "Its idea of composition is totally whack" (Fstoppers, Aftershoot). Distill "may reject images with closed eyes that carry emotional value" (Fstoppers, Narrative). "It marks an eye-closed shot as the best shot" (Fstoppers, Optyx). "Very sharp images are rejected" (Adobe Community, Lightroom). 7+ sources.
+1. **The false reject of a keeper** (every AI tool): shallow depth of field, intentional motion blur, a small subject in blurry foreground, a deliberately closed eye, a squint in bright light. "Its idea of composition is totally whack" (Fstoppers, Aftershoot). Distill "may reject images with closed eyes that carry emotional value" (Fstoppers, Narrative). "It marks an eye-closed shot as the best shot" (Fstoppers, Optyx). "Very sharp images are rejected" (Adobe Community, Lightroom). 7+ sources — all of them reviews and support threads; see the contradiction under "in their own words", where photographers talking to each other never raise it.
 2. **It does not know where the emotion is.** A wedding reviewer on Aftershoot: time saved "around 5 to 10 percent, not more"; it "does not pick the best frame, does not understand where the emotion is" (Trustpilot, Aug 2026). The judgment pass is not the pass the tools save. 3 sources.
 3. **Slowness and hardware dependence**: Lightroom's own culling "very slow", stopping "after analysing less than 1,000"; Aftershoot "highly dependent on number of CPU cores"; Lightroom previews "render in minutes, not split seconds"; Bridge "unusable" after version 12. 6 sources.
 4. **Marks that vanish**: stars and flags silently reverting to zero across Lightroom catalog operations (Adobe Community, Lightroom Queen). 3 sources.
@@ -101,15 +108,105 @@ permission, never replace, build with photographers) was a response to a
 competitor's generative tools; the market is rewarding the posture this
 app already holds.
 
+## What photographers say, in their own words
+
+296 comments from the archive, read after the rest of this document was
+written, which makes them a test of it rather than more evidence for it.
+
+**Read this first.** One hostile account wrote 21 of the 118 comments
+mentioning Aftershoot, repeating the same accusations. The volume of
+anti-Aftershoot feeling here is partly one prolific voice, not 21
+independent ones, and is discounted accordingly.
+
+**The contradiction that matters.** This document says the universal
+complaint about AI cullers is the false reject of a keeper: shallow depth
+of field, deliberate blur, a deliberately closed eye. In 286 comments of
+photographers talking to each other, *that specific complaint does not
+appear at all*. The complaint that does appear runs the other way: the
+tools do not reject enough. "It couldn't even consistently get rid of the
+pictures of the floor" (r/Lightroom, 2026-02). "The culling is basically a
+random selection, it's completely useless" (r/photography, 2026-09). The
+general worry behind the false-reject framing is real and stated
+("no ai ever will know what was my intention during a scene and if I
+wanted to keep it or not", r/WeddingPhotography, 2026-06), but the
+specific trigger the review sites report is a review-site artefact. The
+working pain is under-rejection, not over-rejection.
+
+**The redundancy-versus-judgment split survives, with a better number.**
+This document cited one reviewer's "5 to 10 percent". A photographer's own
+account is sharper and larger: "I can use Aftershoot to cull away the real
+duds and reduce the image count by ~30%. That's pretty reliable ... But to
+get it down to an actual 'final cull' has been extremely unreliable"
+(r/WeddingPhotography, 2026-06). Others report nothing at all: "cancelled
+as it literally saved me no time with 50k images" (2026-05); "every time
+it's added to my workload not reduced it" (2026-05). Reliable on duds,
+unreliable on judgment, which is the split this design is built on.
+
+**Everyone reviews the rejects, confirmed outright.** "AfterShoot is AI
+based but it just puts info in a sidecar so I review its decisions
+afterwards" (r/Lightroom, 2026-01). "Let it do the first run through for
+me, then I go in and do a final review" (r/WeddingPhotography, 2026-05).
+No comment in 286 describes trusting a blind export.
+
+**Speed, confirmed.** Photo Mechanic across 52 mentions, praised for
+almost nothing but speed: "runs at speed of thought" (r/Lightroom,
+2026-05); "Never ever mass ingest images directly into Lightroom unless
+you want your computer to grind to a halt" (r/sportsphotography, 2026-09).
+The speed *complaint* lands on Lightroom's preview building, not on the AI
+tools: "waiting on preview builds before I can even start culling is
+maddening" (r/Lightroom, 2026-07).
+
+**Stars are not dead, and they are doing a job.** This document said
+working photographers prefer one flag and one reject. Both schemes are in
+use with no winner, and the multi-pass star workflow is valued precisely
+because it carries a "maybe" between passes: one star on the first pass,
+four or five on the second. That is a real requirement and this design
+meets it a different way, so `docs/SELECT.md` now says which.
+
+**"No tool learns which frame you keep" is disputed.** One long-time user:
+"it also learns. The more you swap around ratings in the app, your cull
+will get better over time" (r/WeddingPhotography, 2026-05). Others report
+the opposite over months: "25k training images and it just never got
+better" (r/Lightroom, 2026-05). One comment against several, so the seat
+is not as empty as this document claimed; it is contested.
+
+**Local processing is a live grievance, not a preference.** A poster
+quoted Aftershoot's own terms — "Use your photographs and editing data to
+train artificial intelligence systems that power the Aftershoot
+application" — against its local-processing marketing
+(r/WeddingPhotography, 2026-04). Whatever the merits, a product that
+genuinely never sends a frame anywhere has something to say here.
+
+**Times and passes, in their numbers.** Two to four passes is the norm.
+"Culling is about a couple of hours, edit between 6 and 15 hours" per
+wedding (2026-08). "Culling takes me 2-4h if I'm concentrating ... I never
+use the newer tools, they cost me more time than they save" (2026-08).
+Sports: 4,000 to 8,000 frames an event, culled in camera between plays.
+
+**What they ask for that nothing does.** "I wish the auto button was
+actually a predictive editing button ... based on my patterns and past
+behaviours" (r/Lightroom, 2026-08). And a founder building a rival names
+the same gap this design names: "a fast, keyboard-driven photo review
+workspace for photographers who want to move through large shoots without
+handing the final decisions to a black-box auto-cull"
+(r/WeddingPhotography, 2026-08).
+
 ## What it decides
 
 Ten things the evidence settles for `docs/SELECT.md`, most of them
-confirming the draft, three of them changing it:
+confirming the draft, two of them changing it, and one of them standing
+only after the photographers' own words took its stated reason away:
 
-1. **Never mark a frame bad.** The universal complaint is the false reject
-   of a keeper. Relative within the scene ("there is a better one here")
-   is defensible; an absolute verdict is the failure every tool shares.
-   Confirms.
+1. **Never mark a frame bad.** Not for the reason the review sites give.
+   The false reject of a keeper does not appear in 286 photographers
+   talking to each other; the working complaint is the opposite, that the
+   tools do not reject enough. The rule stands on the other ground: an
+   absolute verdict is a claim about the photograph that only its owner
+   can make, and a tool that makes it is not trusted with the next one.
+   Relative within the scene ("there is a better one here") is a claim
+   about redundancy, which is the claim the archive can actually support.
+   Confirms, on a different footing; and under-rejection is an argument
+   for the cull, not against it.
 2. **Sell the redundancy pass, not the judgment pass.** The saving vendors
    claim is hours; the saving a working reviewer measured is 5–10%,
    because emotion is still his. Our split, in the market's words.
@@ -121,9 +218,14 @@ confirming the draft, three of them changing it:
    Instant switching, no render, no import wait. The pass must be as fast
    as Photo Mechanic and as sure of focus as a real decode, which the
    tile-and-loupe scheme already gives. Confirms.
-5. **One flag and one reject, no stars.** Both hand methods say so. The
-   pass's keys are keep, swap, nothing, compare; no rating anywhere.
-   Confirms.
+5. **One flag and one reject, no stars — but the "maybe" is real.** Both
+   hand methods teach one flag and one reject, and the pass's keys stay
+   keep, swap, nothing, compare with no rating anywhere. What the star
+   workflow is actually for is carrying a maybe between passes: one star
+   on the first pass, four on the second. The cut already carries it —
+   a frame in the select after the first cut is the maybe, and the next
+   cut is the second pass — so the design owes the reader that sentence
+   rather than a rating. Confirms; **sharpens the design**.
 6. **Faces at once.** The face close-up panel is the one AI-era surface
    every reviewer praises. **Changes the design**: the pass's strip gains a
    face row when the scene has faces, every detected face at once with its
@@ -132,11 +234,18 @@ confirming the draft, three of them changing it:
 7. **The log is the only state, and marks never vanish.** Lightroom's
    silently reverting stars are a top-three complaint. Confirms; and worth
    a proof that a select survives a close, a crash and a reindex.
-8. **Local, always.** Client RAWs in the cloud are a live worry; every
-   local tool earns praise for it. Confirms the product boundary.
-9. **Learning which frame a person keeps is the empty seat.** No tool in
-   the table does it; two learn an editing style. Confirms step six as the
-   thing worth earning a number for.
+8. **Local, always.** Not a preference but a live grievance: a
+   competitor's own terms reserve the right to "use your photographs and
+   editing data to train artificial intelligence systems", read against
+   its local-processing marketing. A product that genuinely never sends a
+   frame anywhere has something to say, and can only say it if it is
+   true. Confirms the product boundary, and raises what it is worth.
+9. **Learning which frame a person keeps is contested, not empty.** No
+   tool in the table documents it, two learn an editing style, and one
+   long-time user reports that swapping ratings does improve the cull
+   while others report months with no change. Either way nobody can point
+   at what was learned. Confirms step six, and shifts what it has to earn:
+   not the first to learn, the first whose learning is legible.
 10. **Client proofing is one-way everywhere.** **Changes the design**: the
     contact sheet's numbers coming back as decisions with the client as
     author is the practice's missing half, and the log already allows it;
