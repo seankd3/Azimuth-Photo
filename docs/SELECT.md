@@ -178,6 +178,51 @@ beat is confirmed with one key. The wall holds seventy; a week later, cut
 again brings it to sixty for the book; the twelve for a post is a third
 round over the sixty.
 
+## What a scene is, in each kind of work
+
+Only two things vary between kinds of work: what a scene is, and what
+makes a lead. The fit weighs facets differently per select because the
+swaps teach it; no one names the difference.
+
+| Work | A scene is | A lead is | Budget |
+|---|---|---|---|
+| Wedding, event | a run by cadence and by who is in frame | eyes open, faces sharp, the moment | coverage; a same-day peek is the same select with a budget of ten |
+| Portrait session | a pose, found by likeness more than time | expression, eye sharpness | one per pose |
+| Sport, wildlife, children | a play, a tight burst | subject sharp at the peak | one per play; the cull that pays most |
+| Product, interiors | a setup or a room, pure likeness | sharpness and exposure | one per setup, always |
+| Street, landscape | mostly loners | the frame itself | the pass degenerates gracefully into Rank across singles; the guard works across the body |
+| A family across decades | the same people at the same events, years apart | as the person swaps | a person's life, scope one chip |
+| Client proofing | as the delivery | as the client marks | the contact sheet goes out numbered; the marks come back as decisions with the client as author, which the log already allows |
+
+## Where the computer beats the desk
+
+- **Exhaustive comparison.** Every kept frame against every other for
+  likeness. Sixty prints on a floor hide pairs; six hundred cannot be laid
+  out.
+- **Work done before the person sits down.** Scenes and leads are made on
+  the chore lane, as tiles are, the night the card is imported. The pass
+  opens with the doubtful scenes ready and the sure ones settled under the
+  tilde; no one watches it think.
+- **Preview of a decision.** Type a different budget and the wall dims what
+  would go before anything goes. A number, not a knob; the cut stays the
+  person's.
+- **Consistency**, across three thousand frames and across selects: the
+  head that learned last month's leads proposes this month's.
+- **Seeing what a thumbnail hides**: a blink in a background face, a focus
+  miss at 100%, the same frame filed twice on two drives.
+- **Counting**: the budget, the coverage, the alike pairs, the scenes left;
+  always current, never a chore.
+
+## The list
+
+Deliveries have a shot list; every working photographer writes one. A
+select holds it as plain phrases ("rings", "first dance", "the
+grandmother"), each a meaning search the app already has, and the wall
+shows which lines have a kept frame and which have none. Search reused,
+the practice itself, and coverage turned from a count into the answer a
+client will ask for. It joins because it is the rule applied to a list
+the person already keeps, not a feature beside it.
+
 ## The same rule culls
 
 A scene that has a lead has, by the same act, a rest. The pass offers to
