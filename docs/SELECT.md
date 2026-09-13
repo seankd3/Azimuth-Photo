@@ -172,8 +172,8 @@ the test of the design is that none ever will.
 
 Three budget rules in all (a number, a floor per chapter, coverage), one
 chosen when the select is opened and shown on the count line. A smart
-album is a select that has not been edited yet, and stays alive as new
-photographs match its rule.
+album is a select that has not been edited yet; what it does as new
+photographs match its rule is the standing question below.
 
 **A worked example.** A long trip: two coasts, a city, three days in the
 mountains, an engagement on the last summit. Round one walks a few hundred
@@ -226,6 +226,121 @@ shows which lines have a kept frame and which have none. Search reused,
 the practice itself, and coverage turned from a count into the answer a
 client will ask for. It joins because it is the rule applied to a list
 the person already keeps, not a feature beside it.
+
+## Where a comparison pays: the boundary
+
+Sean, 09-13: "does our ranking mode improve the efficiency of this sort of
+work?"
+
+Honestly: for a delivery, no, and it would make it slower. Rank produces an
+ordering, and an ordering costs many rounds per photograph to settle. A
+delivery does not need an order. It needs one decision per scene against a
+threshold, which is one pass. Spending Rank rounds on three thousand frames
+to learn that frame 1,400 outranks frame 1,900, when both are delivered and
+neither is ever looked at again, is work with no answer attached.
+
+For a portfolio, the opposite: comparison is the only instrument that
+works. Twenty from a lifetime cannot be chosen by a threshold, because no
+absolute score is trustworthy at that precision, and the practice agrees
+(the sources reject "rate this" and keep "this or that"). There the order
+*is* the product.
+
+So the rule, which is decision theory and not a preference:
+
+**A comparison is worth exactly what it changes. Spend rounds at the
+boundary.**
+
+Every select has a boundary: the budget's last slot. Frames far above it
+are kept whatever happens; frames far below it are out whatever happens;
+comparisons among either are information the select cannot use. The frames
+that straddle the line are the only ones whose order decides anything, and
+the fit already knows which they are: it scores every photograph and says
+how unsure it is of each (`fitted` in `web/rank.py` returns both).
+
+This gives Rank one new mode and makes it the engine of the whole
+workspace rather than a game beside it:
+
+| Mode | Seats | Serves |
+|---|---|---|
+| `learn` (today) | where the fit is most unsure | taste, before any select exists |
+| `tournament` (today) | the highest-rated judged frames | finding the very top |
+| **`bubble`** (new) | the frames whose scores straddle the budget's last slot, most unsure first | every select, at the only place an answer changes |
+
+The bubble is a scope, not a strategy: `candidates(..., mode="bubble")`
+over the select's kept-and-near-kept band. A round from it is a round in
+the same log, fitted by the same head. Nothing else about Rank changes.
+
+What this buys, by shape:
+
+- **A delivery** spends no rounds at all by default. The pass settles it;
+  the bubble is offered only when the count is over budget and the person
+  wants the cut decided rather than taken by rule.
+- **A portfolio** is almost entirely bubble rounds: twenty slots, a
+  thousand candidates, and every round is a duel at the line. This is the
+  one shape where Rank *is* the workspace.
+- **A subject album or a review** sits between: a pass for redundancy,
+  then a handful of bubble rounds where the floor per chapter bites.
+
+## A select is a standing question
+
+Sean, 09-13: "cultivating regular commercial work, and reflective lifetime
+portfolios, and subject based currated albums... thinking about the
+dynamic/smart collections, what's the optimal shape here?"
+
+The shape is one spectrum, not three kinds of thing. Membership can be
+decided by hand, by rule, by rule with exceptions (`docs/ORGANIZING.md`'s
+pins and exclusions), or by rule and then edited down. That last one is a
+select. So:
+
+**A select is a smart album that has been edited, and it stays alive.**
+
+Its scope is a rule, so new photographs match it as they arrive. What
+arrives does not silently join the kept set and does not silently vanish:
+it arrives at the boundary. A new frame whose score clears the weakest
+keeper is **a challenger**, and the select says so quietly in the sidebar
+("Portfolio · 1 challenger"). One key opens a duel between the challenger
+and the frame it threatens; the winner is kept, and the round is a round.
+That is the whole mechanism, and it is the same boundary again.
+
+This is what separates the three kinds of work without three designs:
+
+| Work | Its boundary | After the first pass |
+|---|---|---|
+| **Commercial delivery** | coverage, every scene represented | finished; archived with the job. Challengers are meaningless once delivered, so a delivered select is closed and says so |
+| **Lifetime portfolio** | the twentieth slot | never finished. Standing forever, challengers arrive with every shoot, the fit sharpens with every duel |
+| **Subject album** | a number or coverage | standing, refreshed as the person or label gains photographs; unwalked scenes queue at the end of the spine |
+
+One noun, one pass, one boundary, three lifetimes. A delivery closes, a
+portfolio never does, a subject album waits.
+
+## What image understanding is actually for
+
+The app has an embedding space, faces, places, capture time and the
+technical facets. The temptation is to spend them on features. They earn
+their place only where they serve the one rule or the boundary:
+
+- **Making a scene a scene.** A burst is time; a scene is a subject. The
+  space is what widens "four on one beat" into "the twenty frames of her
+  on the summit, over eleven minutes, in two bursts". Without it the one
+  rule only works on machine-gun sequences.
+- **Distinctness across a whole select**, which is the portfolio's only
+  real instrument: every lead unlike every other, by distance in the
+  space, over hundreds of frames at once. No person does this on a floor.
+- **The shape of what is kept.** The same distances say what a select is
+  made of: "fourteen of these twenty are the same golden field". Shown as
+  the frames themselves, grouped, never as a score or a chart, and only on
+  the wall where composing happens. This is the guard told as a picture
+  instead of a pair, and it is the one thing a person genuinely cannot see
+  unaided.
+- **Coverage against words.** A shot list's phrases are vectors; the wall
+  says which lines have a frame. Search reused, nothing new.
+
+And the honest limit, which the market research confirms from every
+direction: the space knows what a photograph is *of* and what it is *like*.
+It does not know what it is *worth*. Worth comes from the person's rounds,
+and only from there. Every tool that inferred worth from the picture alone
+produced the industry's universal complaint, the false reject of a keeper
+(`docs/culling-market-research.md`).
 
 ## The same rule culls
 
@@ -311,13 +426,23 @@ lands as its own pull request.
 2. **The pass and the second look**: a select is an album with a budget
    rule and a round.
 3. **The guard and the budget**: alike across the select, the count line,
-   the offered cuts, coverage, and with it the cull.
+   the offered cuts, coverage, and with it the cull. The budget defines the
+   boundary everything after this leans on.
 4. **The wall, cut again, the contact sheet.**
 5. **Chapters and beats** on the margin.
 6. **Learning inside the select**: the head refit between chapters,
    measured as held-out accuracy on the person's own swaps
    (`scripts/sim_learn.py`'s way). The one step with a number to earn.
-7. **The cover, and export in order.**
+7. **The bubble**: `candidates(mode="bubble")` seats the frames straddling
+   the budget's last slot, most unsure first. Measurable before it ships,
+   `scripts/sim_learn.py`'s way: rounds spent at the boundary against rounds
+   spent by `learn`, scored on how often the final kept set changes. A mode
+   that does not change the set faster than the one it replaces does not
+   ship.
+8. **The standing select**: a challenger at the boundary when new work
+   matches the scope, one key to duel it against the frame it threatens; a
+   delivery closes instead.
+9. **The cover, and export in order.**
 
 ## Sources
 
