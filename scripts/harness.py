@@ -68,14 +68,19 @@ STUB = r"""<script>
   };
   const api = {
     home: () => 'C:/harness/home', propose_home: () => 'C:/harness/home', settle_home: (p) => p, version: () => ({ commit: 'harness0', when: '12 Sep 2026' }), report: () => null,
-    counts: () => ({ photos: N, starred: 0, unidentified: 0, trash: 0 }),
+    counts: () => ({ photos: N, starred: 0, unidentified: 0, trash: 3 }),
     drives: () => [{ id: 1, uuid: 'u-1', root: 'C:/harness/photos', label: 'Harness', is_record: 0, attached: true, seen_at: 0 }],
     pulse: () => ({ done: 0, swept: 1, shaped: 0, cards: 0, doing: null, left: {} }),
     look: () => 0,
     photos: (sort, limit, offset, view) => (sort === 'oldest' ? [...shown(view)].reverse() : shown(view)).slice(offset, offset + limit),
     size: (view) => shown(view).length, folders: () => [], photo: (pid) => shown(null).find((p) => p.id === pid),
     stack: (ids) => ({ cover: ids[0], members: ids.slice(1) }), merge_preview: () => null, unstack: (ids) => ({ unstacked: ids }),
-    trash_photos: () => [], trash_count: () => 0,
+    // Three in Trash, and a preflight that takes a beat, so a probe can see
+    // whether the dialog waits on it (it must not).
+    trash_photos: () => photos.slice(-3).map((p) => ({ ...p, status: 'trashed' })), trash_count: () => 3,
+    empty_trash: (n, dry) => (dry
+      ? new Promise((resolve) => setTimeout(() => resolve({ count: n, identities: n, files: n }), 1200))
+      : { emptied: photos.slice(-3).map((p) => p.id), errors: [], remaining: 0 }),
     days: (view) => days.map((d, i) => (i === 0 ? { ...d, count: d.count + shown(view).length - N } : d)),
     sessions: () => [],
     albums: () => [], cameras: () => [{ model: 'EOS R5', photos: N }], labels: () => [], cards: () => [],
