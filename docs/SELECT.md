@@ -37,7 +37,7 @@ something below.
    kept" are what a person loses and a machine never does. Order, rhythm
    and meaning are the reverse.
 5. **The log is the only state.** Every proposal is derived; every act is a
-   decision with a way back. A select can always be recomputed and a round
+   decision with a way back. A select can always be recomputed and a cut
    replayed; nothing is managed.
 6. **Never wait, never rush.** The pass is instant. The wall is slow on
    purpose.
@@ -66,7 +66,7 @@ source). Each line of practice decides one thing here.
 | The practice | Decides |
 |---|---|
 | One frame per moment; fourteen frames of one moment become one in the book (13) | the one rule |
-| The edit is made in rounds with time between: 27,000 frames to 1,000 work prints to 83 over a year (1); weeks on an editor's floor (2) | a select is a sequence of rounds; every round is kept and any can be returned to |
+| The edit is made in cuts with time between: 27,000 frames to 1,000 work prints to 83 over a year (1); weeks on an editor's floor (2) | a select is a sequence of cuts; every cut is kept and any can be returned to |
 | "Keep the pictures we couldn't live without, and then keep cutting from there" (3) | the budget is a target the count line reads against, and the offered cuts come in the rule's order |
 | The whole set is seen at once, as prints on a floor (2) | the wall: every kept frame visible together, moved by hand |
 | A second pair of eyes is structural; the maker is the worst judge of their darlings (2, 5, 6) | the contact sheet: the wall as one numbered sheet, for anyone, anywhere |
@@ -90,10 +90,10 @@ Numbers the defaults come from:
 
 | Noun | What it is | Machine-made? |
 |---|---|---|
-| **Select** | An album with a scope (a chip sentence, the language every surface already speaks), a budget rule, and its rounds. Plain albums stay plain; a select is an album that has been edited. | no — the person opens one |
-| **Scene** | In the first round, a run of frames on one beat widened by likeness (the cadence law's set, merged with its neighbours when the space says they are the same subject). In later rounds, a group of kept frames the space calls alike. | predicted; split and merge are decisions |
+| **Select** | An album with a scope (a chip sentence, the language every surface already speaks), a budget rule, and its cuts. Plain albums stay plain; a select is an album that has been edited. | no — the person opens one |
+| **Scene** | In the first cut, a run of frames on one beat widened by likeness (the cadence law's set, merged with its neighbours when the space says they are the same subject). In later cuts, a group of kept frames the space calls alike. | predicted; split and merge are decisions |
 | **Lead** | The scene's frame in the select, proposed by the fit, accepted or swapped with one key. | predicted until accepted |
-| **Round** | One pass over the select's scenes, kept whole. Round one edits the shoot; round two edits round one's wall; and so on until the person stops. | no — the person starts one |
+| **Cut** | One pass over the select's scenes, kept whole. The first cut edits the shoot; the second edits the first's wall; and so on until the person stops. The photographers' own word, and Rank's *round* keeps its own meaning: one comparison, one winner over a set, as the decision log stores it. | no — the person starts one |
 
 Chapters are sessions with places, which the app already has; a beat is a
 scene the person marks, not a noun. The vocabulary of the canon is kept
@@ -147,10 +147,10 @@ every scene · 6 alike") and, over it, offers cuts in the rule's order:
 the weakest lead of the most-represented chapter, then the closer of any
 alike pair.
 
-**Cut again** starts the next round: the wall becomes the pool, alike
+**Cut again** starts the next cut: the wall becomes the pool, alike
 groups become the scenes, and the pass runs over them. The select remembers
-which round it is on and where the person stopped. Every round is kept;
-"back a round" is one act.
+which cut it is on and where the person stopped. Every cut is kept; "back a
+cut" is one act.
 
 **The contact sheet** is the wall as one numbered sheet, exported for a
 second pair of eyes anywhere. **The cover** is proposed as the highest-rated
@@ -176,11 +176,11 @@ album is a select that has not been edited yet, and stays alive as new
 photographs match its rule.
 
 **A worked example.** A long trip: two coasts, a city, three days in the
-mountains, an engagement on the last summit. Round one walks a few hundred
+mountains, an engagement on the last summit. The first cut walks a few hundred
 scenes in an evening; the margin's density spikes at the summit and the
 beat is confirmed with one key. The wall holds seventy; a week later, cut
-again brings it to sixty for the book; the twelve for a post is a third
-round over the sixty.
+again brings it to sixty for the book; the twelve for a post is a third cut
+over the sixty.
 
 ## What a scene is, in each kind of work
 
@@ -253,7 +253,7 @@ and the book dummy are the practice this serves instead.
 | Fact | Where it lives | Used for |
 |---|---|---|
 | When; sessions by capture gap | `date_taken`, `web/library.py` | chapters, the margin |
-| Bursts | the cadence law, `web/stacks.py` | first-round scenes |
+| Bursts | the cadence law, `web/stacks.py` | the first cut's scenes |
 | Likeness | `web/embed.py`, `web/rank.py`'s `_spread` | wider scenes; later-round scenes; the guard |
 | Strength | Plackett–Luce ratings, `web/rank.py` | the lead; tournament rounds among leads |
 | Facets | eyes, subject sharpness, exposure, orientation, colour (`web/sharpness.py`, `web/photostats.py`) | the lead's fit; the wall's shape and tone |
@@ -309,7 +309,7 @@ lands as its own pull request.
 1. **Scenes and leads**: the cadence law's sets widened by likeness over a
    scope; a lead by the fit. Fives on the fixture become one scene each.
 2. **The pass and the second look**: a select is an album with a budget
-   rule and a round.
+   rule and a cut.
 3. **The guard and the budget**: alike across the select, the count line,
    the offered cuts, coverage, and with it the cull.
 4. **The wall, cut again, the contact sheet.**
