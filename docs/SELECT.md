@@ -115,6 +115,14 @@ so a group is judged without zooming (the one AI-era surface every
 reviewer of every tool praises; `docs/culling-market-research.md`). Every
 act one key, no act waits.
 
+The budget rule decides which way the pass runs, which is how the two
+schools the practice records turn out to be one mechanism. Under a number
+nothing is in until it is chosen, and the pass is pick-first ("you should
+be selecting images to keep", Shotkit). Under coverage every scene is in
+unless it is cut, and the pass is reject-first, which is the three-pass
+wedding workflow. The keys are the same either way; only the default
+changes, and the count line says which it is.
+
 | Key | Act |
 |---|---|
 | Enter | keep the lead, next scene |
@@ -132,9 +140,13 @@ by the third. When a proposed lead sits close in the space to a frame
 already kept anywhere in the select, the kept one appears beside it with
 one word, "alike", and the two keys that resolve it: the guard.
 
-When the pass ends, **the second look**: one screen of the highest-rated
-frame from every scene that gave nothing, one key to admit each. A pass
-that cannot be checked is a pass a person will not trust.
+When the pass ends, **what's missing**: one screen, one key to admit each
+frame, and three kinds of entry on it, because a select is incomplete in
+only three ways. A scene that gave nothing shows its highest-scoring frame
+(the second look, and a pass that cannot be checked is a pass a person will
+not trust). A chapter under its floor shows what would raise it. A line of
+the list with no frame against it shows the nearest the scope holds. One
+question, one screen: *what have I not got?*
 
 **The wall** is the slow room. Every kept frame at once, in order, as
 prints on a floor; the chapters along its left margin, drawn to the
@@ -146,6 +158,11 @@ ever offers. The count line reads against the budget ("312 of 4,000 ·
 every scene · 6 alike") and, over it, offers cuts in the rule's order:
 the weakest lead of the most-represented chapter, then the closer of any
 alike pair.
+
+A select is rarely finished in one sitting and never pretends to be. The
+count line separates what has been judged from what has not ("23 kept · 42
+scenes walked · 160 unwalked"), the pass resumes where the person stopped
+rather than at the beginning, and an unwalked scene is not a rejected one.
 
 **Cut again** starts the next cut: the wall becomes the pool, alike
 groups become the scenes, and the pass runs over them. The select remembers
@@ -273,11 +290,11 @@ like. It never knows what it is worth.
 
 Deliveries have a shot list; every working photographer writes one. A
 select holds it as plain phrases ("rings", "first dance", "the
-grandmother"), each a meaning search the app already has, and the wall
-shows which lines have a kept frame and which have none. Search reused,
-the practice itself, and coverage turned from a count into the answer a
-client will ask for. It joins because it is the rule applied to a list
-the person already keeps, not a feature beside it.
+grandmother"), each a meaning search the app already has. It has no surface
+of its own: a line with no frame against it is one more entry on what's
+missing, beside the scenes that gave nothing and the chapters under their
+floor. Search reused, the practice itself, and coverage turned from a count
+into the answer a client will ask for.
 
 ## Where a comparison pays: the boundary
 
@@ -348,12 +365,14 @@ select. So:
 
 Its scope is a rule, so new photographs match it as they arrive. What
 arrives does not silently join the kept set and does not silently vanish:
-it arrives at the boundary. A new frame whose score clears the weakest
-keeper is **a challenger**, and the select says so quietly in the sidebar
-("Portfolio · 1 challenger"). One key opens a duel between the challenger
-and the frame it threatens; the winner is kept, and the duel is a round in
-the same log as every other.
-That is the whole mechanism, and it is the same boundary again.
+it arrives at a boundary, and there are two, because a select can be full
+in two different ways. Where the budget is a number the boundary is the
+last slot, and a new frame clearing the weakest keeper is **a boundary
+challenger**. Where the budget is coverage there is no last slot: the
+boundary is inside each scene, and a new frame outscoring its own scene's
+lead is **a lead challenger**. Either way the select says so quietly in the
+sidebar ("Portfolio · 1 challenger"), one key opens the duel, the winner is
+kept, and the duel is a round in the same log as every other.
 
 This is what separates the three kinds of work without three designs:
 
@@ -438,6 +457,10 @@ returning as decisions.
   export, later, from the same order.
 - **A third room**: the first draft had a spine as its own surface; it is
   the wall's margin.
+- **A room for the first look.** The practice does look before it chooses
+  (Frank's thousand work prints). That looking is the grid the app already
+  has, pointed at the scope; a select opens onto the pass because by then
+  the person has seen the shoot.
 
 ## Building it, in order
 
