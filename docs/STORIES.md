@@ -187,6 +187,27 @@ The gap in the market is the same one `docs/ORGANIZING.md` found: no tool
 lets the person correct the machine and have the machine learn from it.
 Here the correction is a swap, and the learning is the next chapter's leads.
 
+## Nothing extra
+
+Sean, 09-13, on a first list of nine additions: "those are interesting
+gimmicks but i want elegance not occasionally useful bells". The list is
+gone. Three of its items were the one rule again, and belong to the
+surfaces they came from rather than to a list of features:
+
+- **The spine is the story's pulse.** Chapters drawn to the density of
+  shooting (frames per hour) is not a chart added to the spine; it is what
+  the spine is, and the gaps in it are the story's gaps.
+- **The second look is the pass's undo for omission.** When the pass ends,
+  the highest-rated frame from every scene that gave nothing, one screen,
+  one key to admit. A pass that cannot be checked is a pass a person will
+  not trust.
+- **The post is the book's budget applied again.** Twelve from the sixty is
+  the same pass over the sixty; nothing new is built for it.
+
+Everything else on that list (rhythm marks, captions, returns, a second
+curator, a story from a sentence) is recorded below as rejected, with the
+one-line reason each earned.
+
 ## Deliberate rejections
 
 - **A quality score on every frame.** Deleted once already (the August
@@ -195,6 +216,11 @@ Here the correction is a swap, and the learning is the next chapter's leads.
   The machine's whole job is to make the walk short.
 - **A layout tool.** Order and cover are the story's; pages and spreads are
   export's, later, from the same order.
+- **Bells.** Rhythm marks (wide, medium, tight), factual captions, a place
+  noticed across two stories, a second curator, a story from a sentence:
+  each occasionally useful, none of them the rule, every one a surface to
+  maintain. A person who wants a caption types one; a person who wants
+  rhythm has the wall in front of them.
 - **A separate application.** Stories are albums; scenes are stacks the
   space widened; leads are rounds; chapters are sessions with places. The
   workspace is one stage and one set of keys.
