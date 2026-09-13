@@ -198,24 +198,76 @@ swaps teach it; no one names the difference.
 | A family across decades | the same people at the same events, years apart | as the person swaps | a person's life, scope one chip |
 | Client proofing | as the delivery | as the client marks | the contact sheet goes out numbered; the marks come back as decisions with the client as author, which the log already allows |
 
-## Where the computer beats the desk
+## How the machine earns its place
 
-- **Exhaustive comparison.** Every kept frame against every other for
-  likeness. Sixty prints on a floor hide pairs; six hundred cannot be laid
-  out.
-- **Work done before the person sits down.** Scenes and leads are made on
-  the chore lane, as tiles are, the night the card is imported. The pass
-  opens with the doubtful scenes ready and the sure ones settled under the
-  tilde; no one watches it think.
-- **Preview of a decision.** Type a different budget and the wall dims what
-  would go before anything goes. A number, not a knob; the cut stays the
-  person's.
-- **Consistency**, across three thousand frames and across selects: the
-  head that learned last month's leads proposes this month's.
-- **Seeing what a thumbnail hides**: a blink in a background face, a focus
-  miss at 100%, the same frame filed twice on two drives.
-- **Counting**: the budget, the coverage, the alike pairs, the scenes left;
-  always current, never a chore.
+Sean, 09-13: "how can we best leverage the computer and cutting edge
+software to best serve users?"
+
+The fashionable answer is more model. The useful answer is six older
+ideas, and one test for when a model is the right tool at all.
+
+**Do what is cheap for a machine and dear for a person.** Counting,
+remembering, exhaustive comparison, vigilance that never tires. A person
+laying sixty prints on a floor cannot see every pair; six hundred cannot be
+laid out at all. The machine compares every kept frame to every other and
+never gets bored at frame two thousand. It should never be asked to judge,
+which is cheap for the person and impossible for it.
+
+**Move every cost to before the sitting.** The largest lever in this app is
+not a model, it is the scheduler. Scenes, leads, likeness and facets are
+made on the chore lane the night a card is imported, as tiles already are.
+When the person opens the pass, the doubtful scenes are ready and the sure
+ones are settled under the tilde. Nobody watches it think.
+
+**Latency is not a metric, it is whether a thought survives.** Under a
+tenth of a second the person's attention stays on the photograph; over a
+second it moves to the tool, and the edit becomes software operation. This
+is why Photo Mechanic, which has no intelligence of any kind, still beats
+every clever thing in the field for the first pass
+(`docs/culling-market-research.md`). Being instant is the intelligence a
+person feels.
+
+**Every decision must make the next one better, forever.** Most software
+treats a sitting as disposable: the picks are an output, and next month
+starts from nothing. Here the rounds are the asset and everything else is
+derived. The head that learned a person's leads last month proposes this
+month's; a select's swaps sharpen it inside the select; ten years of
+sittings compound into something no new tool can hand anyone. This is the
+whole return on the work, and it exists only because decisions are kept as
+decisions rather than as scores.
+
+**Decisions durable, computations rebuildable** is also how the app stays
+current without churn. A better encoder arrives next year: swap it, refit
+the same rounds against the new space, and every past judgement still
+counts. Had the app stored scores instead of rounds, it could never take
+the upgrade without losing the person's history. Being able to replace the
+model is worth more than having the newest one.
+
+**Local is no longer a trade.** The encoder, the faces and the sharpness
+read all fit on a modest card; privacy costs nothing now, and the research
+shows client RAWs in the cloud is a live worry across the field. Nothing
+leaves the machine.
+
+### The test for a model
+
+Does the question belong to the photograph or to the person?
+
+| Question | Belongs to | Answered by |
+|---|---|---|
+| What is in this frame? Who? Where? | the photograph | a model, well |
+| Is it sharp, are the eyes open, is it exposed? | the photograph | a model, well |
+| What is this frame like? Which frames are the same subject? | the photograph | the embedding space |
+| Which of these is better? What is worth keeping? | the person | the rounds, only |
+| What should come after what? | the person | nobody but them |
+
+Every tool that answered a person-question with a model produced the
+field's universal complaint, the false reject of a keeper. The four places
+image understanding earns its keep here are all photograph-questions:
+making a scene a subject rather than a burst, distinctness across a whole
+select, the shape of what is kept (shown as the frames themselves, grouped:
+"fourteen of these twenty are the same golden field"), and coverage against
+a list's words. The space knows what a photograph is of and what it is
+like. It never knows what it is worth.
 
 ## The list
 
@@ -312,35 +364,6 @@ This is what separates the three kinds of work without three designs:
 
 One noun, one pass, one boundary, three lifetimes. A delivery closes, a
 portfolio never does, a subject album waits.
-
-## What image understanding is actually for
-
-The app has an embedding space, faces, places, capture time and the
-technical facets. The temptation is to spend them on features. They earn
-their place only where they serve the one rule or the boundary:
-
-- **Making a scene a scene.** A burst is time; a scene is a subject. The
-  space is what widens "four on one beat" into "the twenty frames of her
-  on the summit, over eleven minutes, in two bursts". Without it the one
-  rule only works on machine-gun sequences.
-- **Distinctness across a whole select**, which is the portfolio's only
-  real instrument: every lead unlike every other, by distance in the
-  space, over hundreds of frames at once. No person does this on a floor.
-- **The shape of what is kept.** The same distances say what a select is
-  made of: "fourteen of these twenty are the same golden field". Shown as
-  the frames themselves, grouped, never as a score or a chart, and only on
-  the wall where composing happens. This is the guard told as a picture
-  instead of a pair, and it is the one thing a person genuinely cannot see
-  unaided.
-- **Coverage against words.** A shot list's phrases are vectors; the wall
-  says which lines have a frame. Search reused, nothing new.
-
-And the honest limit, which the market research confirms from every
-direction: the space knows what a photograph is *of* and what it is *like*.
-It does not know what it is *worth*. Worth comes from the person's rounds,
-and only from there. Every tool that inferred worth from the picture alone
-produced the industry's universal complaint, the false reject of a keeper
-(`docs/culling-market-research.md`).
 
 ## The same rule culls
 
