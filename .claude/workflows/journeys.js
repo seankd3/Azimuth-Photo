@@ -186,7 +186,10 @@ async function round(scouts, perRound, fixExtra) {
 }
 
 const BAR = `Walk this journey as a person would, in the harness (write probes, run node
-scripts/harness_proof.mjs, read the PROBE lines and the captures) and, where the engine is the
+scripts/harness_proof.mjs out.png --tiles /tmp/claude-0/-home-user-Azimuth-Photo/583734e8-059e-5eab-8814-50be2c51f59b/scratchpad/large-library --friction --probe a.js,
+so the captures show real photographs and window.__friction.acts() gives every act its numbers:
+ms to first change, ms to paint, nodes added and removed, animations started, layout shift; read
+the PROBE lines and the captures, and quote the friction numbers in every finding) and, where the engine is the
 question, with a Library on the development library. Count the steps, the waits, the moments of
 wondering what to do, the dead ends, the acts that lose state. The bar is what the owner named
 (09-12): "notion/factorio levels of polish and QoL UX". Concretely: an act is one key or one
