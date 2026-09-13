@@ -21,6 +21,7 @@ from urllib.request import url2pathname
 
 import rank
 import render
+import selects
 import work
 import model
 import tiles
@@ -2874,6 +2875,85 @@ class ANameCanBeTakenBack(CoreCase):
         self.assertEqual(persons._names(self.conn)["abc:0"][0], "Ada")
         persons.unname(self.conn, "abc:0")
         self.assertNotIn("abc:0", persons._names(self.conn), "an empty word is no name")
+
+
+class ASceneIsASubject(CoreCase):
+    """A scene is the unit the editing workspace turns on: a run of frames
+    of one subject, shown once (`docs/SELECT.md`). The cadence law finds
+    the beat; likeness widens it past the beat; the fit names the lead."""
+
+    def _frame(self, tail, when, digest=None):
+        pid = self.photo(tail)
+        self.conn.execute("UPDATE images SET date_taken = ?, content_hash = ? WHERE id = ?",
+                          (when, digest or f"{pid:064x}", pid))
+        return pid
+
+    def test_a_burst_is_one_scene_and_a_loner_is_its_own(self):
+        # Two bursts of five on their own beats, and one frame an hour off:
+        # three scenes, every frame in exactly one, the loner alone.
+        first = [self._frame(f"Raws/a{i}.cr3", f"2026-05-26 21:00:{i * 3:02d}") for i in range(5)]
+        second = [self._frame(f"Raws/b{i}.cr3", f"2026-05-26 21:30:{i * 3:02d}") for i in range(5)]
+        alone = self._frame("Raws/c.cr3", "2026-05-26 23:00:00")
+        self.conn.commit()
+
+        found = selects.scenes(self.conn)
+
+        self.assertEqual([len(s) for s in found], [5, 5, 1])
+        self.assertEqual(found, [first, second, [alone]])
+        self.assertEqual(sorted(p for s in found for p in s),
+                         sorted([*first, *second, alone]))
+
+    def test_the_lead_is_the_highest_scoring_frame_the_fit_knows(self):
+        burst = [self._frame(f"Raws/d{i}.cr3", f"2026-05-26 21:00:{i * 3:02d}") for i in range(5)]
+        self.conn.commit()
+        digests = {pid: f"{pid:064x}" for pid in burst}
+        # The third frame is the one the rounds like.
+        scores = {digests[pid]: (9.0 if pid == burst[2] else 1.0) for pid in burst}
+
+        led = selects.leads(self.conn, scores=scores)
+
+        self.assertEqual(len(led), 1)
+        self.assertEqual(led[0]["lead"], burst[2])
+        self.assertEqual(led[0]["frames"], 5)
+
+    def test_with_no_rounds_the_first_frame_speaks_and_nothing_is_claimed(self):
+        # A flat fit is an honest one: nothing has been judged, so the scene
+        # is led by its first frame rather than by a guess dressed as a score.
+        burst = [self._frame(f"Raws/e{i}.cr3", f"2026-05-26 21:00:{i * 3:02d}") for i in range(5)]
+        self.conn.commit()
+
+        led = selects.leads(self.conn)
+
+        self.assertEqual(led[0]["lead"], burst[0])
+
+    def test_likeness_carries_a_subject_across_a_gap_in_shooting(self):
+        # Two bursts of the same subject, half an hour apart, and a third of
+        # something else. The cadence law alone says three scenes; the space
+        # says the first two are one subject, and the bar comes from the
+        # bursts themselves, never from a number anyone typed.
+        import numpy as np
+
+        same = [self._frame(f"Raws/f{i}.cr3", f"2026-05-26 21:00:{i * 3:02d}") for i in range(5)]
+        again = [self._frame(f"Raws/g{i}.cr3", f"2026-05-26 21:30:{i * 3:02d}") for i in range(5)]
+        other = [self._frame(f"Raws/h{i}.cr3", f"2026-05-26 22:00:{i * 3:02d}") for i in range(5)]
+        self.conn.commit()
+
+        subjects, rows = [], []
+        for pid in (*same, *again):
+            subjects.append(f"{pid:064x}")
+            rows.append([1.0, 0.02 * (pid % 3), 0.0])
+        for pid in other:
+            subjects.append(f"{pid:064x}")
+            rows.append([0.0, 0.02 * (pid % 3), 1.0])
+        matrix = np.array(rows, dtype=np.float32)
+        matrix /= np.linalg.norm(matrix, axis=1, keepdims=True)
+
+        widened = selects.scenes(self.conn, space=(subjects, matrix))
+
+        self.assertEqual([len(s) for s in widened], [10, 5])
+        self.assertEqual(widened[0], [*same, *again])
+        # And without the space the cadence law's three stand.
+        self.assertEqual([len(s) for s in selects.scenes(self.conn)], [5, 5, 5])
 
 
 class ARoundFindsTheTop(CoreCase):
