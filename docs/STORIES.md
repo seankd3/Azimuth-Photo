@@ -70,7 +70,7 @@ person the questions only the person can answer.
 
 | Noun | What it is | Machine-made? |
 |---|---|---|
-| **Story** | An album with an order and chapters. Plain albums stay plain; a story is an album that has been through the pass. | no — the person opens one |
+| **Story** | An album with a scope, an order and a budget rule, that has been through the pass. Plain albums stay plain. The scope is a chip sentence, the same one every surface speaks. | no — the person opens one |
 | **Chapter** | A run of scenes that share a session and a place (the coast; three days in the city; the mountain). | predicted (tilde) until the person accepts or redraws it |
 | **Scene** | A run of frames on one beat, widened by likeness: the cadence law's set, merged with its neighbours when the space says they are the same subject. Twenty frames of her on the summit are one scene. | predicted; split and merge are decisions |
 | **Lead** | The scene's frame in the story. Proposed by the fit; one keystroke to accept or swap. | predicted until accepted |
@@ -122,6 +122,41 @@ the story appears; one key to take it, or any frame on the wall.
 
 **Search stays search**: "engagement" typed into the box finds the summit
 through the meaning search; the beat is one keystroke from there.
+
+## One pass, many shapes
+
+Sean, 09-13: "what about creating albums around subjects? or like year in
+review? all time portfolio? wedding deliveries? consider all these usecases
+and lets design elegant versatile and powerful."
+
+Every one of them is the pass over a different scope, with a different
+order and a different budget rule. None needs a surface the story does not
+have; the test of the design is that none ever will. The scope is a chip
+sentence, which the app already speaks everywhere (`docs/ORGANIZING.md`);
+the order and the budget rule are the only things a shape adds.
+
+| Shape | Scope (chips) | Chapters | Order | Budget rule | What matters most |
+|---|---|---|---|---|---|
+| **Story** (the trip) | a span of time | sessions with places | time | a number; over it, cut the weakest lead of the most-represented chapter | the beat, the pulse of the spine |
+| **Delivery** (a wedding) | a day or a client's chips | the day's parts: sessions within it, who is in frame | time | coverage: every scene represented, and N per scene grows with the scene's length (eighty frames of the first dance deliver five, three of the rings deliver one) | the second look before export: nothing missed; then cull the rest in one act |
+| **Review** (a year) | a year | months | time | a floor per month so a quiet month still shows, the rest by shooting density | the guard across the year: the same view of the same lake in March and October is one frame |
+| **Portfolio** (all time, or a subject) | everything, or `Label: Portraits`, or `Person: Eris` | none, or by subject | strength, then by hand | small, and the guard is the instrument: every lead unlike every other | across-scene rounds in Rank's tournament mode, where the leaders meet |
+| **Subject** (a person, a label) | one chip | time or none | time | as the person says: a number or coverage | a smart album that has been through the pass; new members arrive as unwalked scenes |
+
+Two things fall out that were not asked for and cost nothing:
+
+- **A smart album is a story that has not been walked yet.** Its rule is the
+  scope; the pass adds the order and the leads. New photographs that match
+  the rule arrive as unwalked scenes at the end of the spine, so a Subject
+  story stays alive without being rebuilt.
+- **The budget rule is the whole difference between shapes.** A number, a
+  floor per chapter, or coverage with N per scene: three rules, one
+  setting per story, chosen once when the story is opened and shown on
+  the count line ("312 of 4,000 · every scene · 6 alike").
+
+Coverage is the rule the culling section needs: with it, "cull the rest"
+after a delivery is the story's own act, and the export in story order is
+the delivery.
 
 ## The same rule culls
 
