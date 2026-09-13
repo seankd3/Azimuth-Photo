@@ -13,6 +13,40 @@ It keeps `docs/ORGANIZING.md`'s law (predicted, then earned) and
 `docs/product-vision.md`'s non-negotiables. A select is an album that has
 been edited; nothing here is a second application.
 
+## First principles
+
+The job is reduction under a person's taste. Taste cannot be computed;
+almost everything around it can. Seven principles follow, and each decides
+something below.
+
+1. **The machine removes what is the same; the person chooses among what
+   is different.** Redundancy is computable from time and likeness.
+   Preference is not. Every screen shows only things that differ and asks
+   one question about them.
+2. **Judgment is comparative, never absolute.** A person is good at "this
+   or that, large, side by side" and poor at "rate this". No screen asks
+   for a score.
+3. **Attention is the scarce resource, so ask only what the machine cannot
+   answer.** Where the fit is sure of a scene's lead and the rest is
+   redundant, the scene is settled without a question, wearing the tilde,
+   visible on the wall and reversible. The pass asks in order of doubt and
+   says how much is left: "42 scenes need you; 258 are settled ~". Three
+   thousand frames become an hour of real decisions.
+4. **The machine remembers, counts and notices; the person composes.**
+   Memory across hundreds of scenes, the budget, and "this is like one you
+   kept" are what a person loses and a machine never does. Order, rhythm
+   and meaning are the reverse.
+5. **The log is the only state.** Every proposal is derived; every act is a
+   decision with a way back. A select can always be recomputed and a round
+   replayed; nothing is managed.
+6. **Never wait, never rush.** The pass is instant. The wall is slow on
+   purpose.
+7. **Three settings, ever.** Scope, budget rule, N. No modes, no sliders,
+   no strictness; the tilde is the only uncertainty shown.
+
+The powerful part and the simple part are the same thing: the app spends
+a person's attention only where it is worth something.
+
 ## The one rule
 
 **A scene is worth its best frame, and a select shows each scene once.**
@@ -67,9 +101,15 @@ scene the person marks, not a noun. The vocabulary of the canon is kept
 
 ## Two rooms
 
-**The pass** is the fast room. One scene at a time: the lead large, the
-scene's other frames as a numbered strip beneath. Every act one key, no
-act waits.
+**The pass** is the fast room. It asks in order of doubt: the scenes
+whose lead the fit is unsure of, or whose frames the space calls different,
+come first; scenes whose lead stands clear of a redundant rest are settled
+without a question, wearing the tilde, and appear on the wall like any
+other kept frame, one key to reopen. The count line says how much needs a
+person ("42 scenes need you; 258 are settled ~"), and the pass ends when
+the doubt does, not when the scenes do. One scene at a time: the lead
+large, the scene's other frames as a numbered strip beneath. Every act one
+key, no act waits.
 
 | Key | Act |
 |---|---|
