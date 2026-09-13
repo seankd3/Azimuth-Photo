@@ -1266,6 +1266,21 @@ class CullIsAReversibleDecision(CoreCase):
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM images").fetchone()[0], 0)
         self.assertGreater(self.conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0], 0)
 
+    def test_the_dry_run_reads_no_bytes_and_the_deletion_reads_them_all(self):
+        # The window shows the dialog first and asks the dry run while the
+        # person reads: it may look at drives and files but never open one.
+        from unittest import mock
+
+        _photo, hot_path, cold_path = self.copied()
+        with mock.patch("model.photos.content_hash", side_effect=AssertionError("read bytes")), \
+                mock.patch("model.photos.same_bytes", side_effect=AssertionError("read bytes")):
+            preview = trash.empty(self.conn, expected_count=1, dry_run=True)
+        self.assertEqual(preview["count"], 1)
+        self.assertTrue(os.path.exists(hot_path) and os.path.exists(cold_path))
+        with mock.patch("model.photos.content_hash", side_effect=AssertionError("read bytes")):
+            with self.assertRaises(AssertionError):
+                trash.empty(self.conn, expected_count=1)
+
     def test_empty_trash_refuses_an_away_drive_before_deleting_anything(self):
         _photo, hot_path, cold_path = self.copied()
         os.remove(os.path.join(self.cold_root, drives.MARKER_NAME))

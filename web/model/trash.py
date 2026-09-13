@@ -34,7 +34,15 @@ def _file_token(path: str) -> tuple[int, int, int, int]:
     return entry.st_dev, entry.st_ino, entry.st_size, entry.st_mtime_ns
 
 
-def _empty_plans(conn) -> tuple[int, list[dict]]:
+def _empty_plans(conn, *, verify: bool = True) -> tuple[int, list[dict]]:
+    """Every trashed identity with the files that hold it. With ``verify``
+    the bytes are read: unhinted copies at the canonical address are found
+    by hash, and every copy is compared to the anchor. Without it only the
+    drives and the files' presence are checked -- a preflight the window
+    can show while a person is still reading the dialog (the owner, 09-13:
+    "takes forever for the dialog box to pop up"); the deletion itself
+    always verifies."""
+
     rows = [
         dict(row)
         for row in conn.execute(
@@ -100,8 +108,10 @@ def _empty_plans(conn) -> tuple[int, list[dict]]:
             key = os.path.normcase(os.path.abspath(candidate))
             if key in paths or not os.path.lexists(candidate):
                 continue
+            # Unverified, a file at the address counts as a copy present; the
+            # deletion reads it and lets it be if it is not this photograph.
             try:
-                if photos.content_hash(candidate) != digest:
+                if verify and photos.content_hash(candidate) != digest:
                     continue
             except (OSError, ValueError):
                 continue
@@ -119,11 +129,12 @@ def _empty_plans(conn) -> tuple[int, list[dict]]:
         for file in files:
             file["token"] = _file_token(file["path"])
         anchor = max(files, key=lambda file: (file["is_record"], file["path"]))
-        if photos.content_hash(anchor["path"]) != digest:
-            raise ValueError(f"copy changed for photo {image_ids[0]}")
-        for file in files:
-            if file is not anchor and not photos.same_bytes(file["path"], anchor["path"]):
-                raise ValueError(f"copies differ for photo {image_ids[0]}")
+        if verify:
+            if photos.content_hash(anchor["path"]) != digest:
+                raise ValueError(f"copy changed for photo {image_ids[0]}")
+            for file in files:
+                if file is not anchor and not photos.same_bytes(file["path"], anchor["path"]):
+                    raise ValueError(f"copies differ for photo {image_ids[0]}")
         ordered = [file for file in files if file is not anchor] + [anchor]
         plans.append({"hash": digest, "image_ids": image_ids, "files": ordered})
     return len(rows), plans
@@ -143,7 +154,7 @@ def empty(conn, *, expected_count: int, dry_run: bool = False) -> dict:
     before = count(conn)
     if expected_count != before:
         raise ValueError(f"Trash changed while you were looking: {before} photographs are in it now.")
-    visible_count, plans = _empty_plans(conn)
+    visible_count, plans = _empty_plans(conn, verify=not dry_run)
     if expected_count != visible_count:
         raise ValueError(f"Trash changed while you were looking: {visible_count} photographs are in it now.")
     if dry_run:
