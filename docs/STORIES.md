@@ -123,6 +123,38 @@ the story appears; one key to take it, or any frame on the wall.
 **Search stays search**: "engagement" typed into the box finds the summit
 through the meaning search; the beat is one keystroke from there.
 
+## The same rule culls
+
+Sean, 09-12: "this can help us cull, for instance, something like Pick the
+top 3 shots and cull the rest? or something like that if theres a big delta
+between shots in a sequence/redundant shots with one subtly better."
+
+A scene that has a lead has, by the same act, a rest. The pass offers to
+deal with the rest, and only offers:
+
+- **Keep N, reject the rest.** On any scene, `3` after `K` (or a count in
+  the story's settings: a story for a book keeps one, a working cull keeps
+  three) keeps the top N of the scene by the fit and rejects the others as
+  Rank's reject already does: to Trash, undoable, never a byte touched.
+- **Only where the fit is sure.** The offer appears when the delta is
+  large: the lead's rating stands clear of the rest by more than the fit's
+  own uncertainty about them. A scene of twenty near-identical frames with
+  one subtly better is exactly this case; a scene of three good and
+  different frames is not, and the pass says nothing.
+- **Redundancy is likeness plus rating.** Two frames the space calls the
+  same subject, one rated above the other: the lower is offered as a cut
+  with the pair shown. The picture is the argument, as with the guard.
+- **The offer wears the tilde.** It is a prediction until the key; a
+  scene walked past keeps everything. Across a whole story, "cull the
+  rest of every sure scene" is one act at the end, shown first as a count
+  ("would reject 1,840 of 2,300, from 212 sure scenes; 41 scenes left as
+  they are") and then done, with one Undo for all of it.
+
+This is the cull the taste research asked for: relative within the
+sequence ("there is a better one in this scene"), never an absolute "bad";
+and it is the one that pays, because a trip of thousands is mostly
+sequences.
+
 ## How the machine guides, and where it stops
 
 - **It proposes, the person decides.** Every proposal wears the tilde until
