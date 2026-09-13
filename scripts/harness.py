@@ -7,18 +7,25 @@ This builds that page from the current bundle and serves it:
 
     python scripts/harness.py            # build/harness.html on :8765
     python scripts/harness.py --build    # only write the page
+    python scripts/harness.py --tiles DIR   # with real photographs in it
 
 Open it, drive it, read its DOM. The fake library is 124 photographs over 27
 days of one year with one four-frame stack, enough for every grid, chapter,
 timeline and selection behaviour; extend `STUB` when a surface needs more.
-Tiles are absent on purpose (cells show their honest pending state), so the
+Tiles are absent by default (cells show their honest pending state), so the
 harness proves shape and behaviour, never pixels -- `scripts/native_proof.py`
-does pixels.
+does pixels. `--tiles DIR` (or `AZIMUTH_HARNESS_TILES`) fills them from a
+folder of real photographs instead, so a proof can watch a real decode cost
+what it costs: the files are handed out in sorted order, the same file to the
+same photograph every run. The page must then be opened as a file (the
+headless proof does), since a page served over HTTP may not read `file://`.
 """
 
 from __future__ import annotations
 
 import http.server
+import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -31,6 +38,10 @@ PORT = 8765
 STUB = r"""<script>
 (() => {
   const N = 124;
+  // The real photographs, if a folder of them was named; else none, and
+  // every cell shows the pending state it shows today.
+  const TILES = __TILES__;
+  const shot = (pid) => (TILES.length ? TILES[(pid - 1) % TILES.length] : null);
   const dates = ['2026-09-08','2026-09-07','2026-09-06','2026-09-05','2026-09-01','2026-08-27','2026-08-26',
     '2026-08-25','2026-08-23','2026-08-22','2026-08-15','2026-08-14','2026-08-05','2026-07-12','2026-07-11',
     '2026-06-05','2026-05-31','2026-05-27','2026-05-26','2026-05-21','2026-04-19','2026-04-18','2026-04-04',
@@ -42,14 +53,14 @@ STUB = r"""<script>
     const count = day === dates[dates.length - 1] ? N - photos.length : Math.min(5, N - photos.length);
     days.push({ day, count });
     for (let i = 0; i < count; i += 1, id += 1) {
-      photos.push({ id, hash: `h${id}`, tail: `Raws/Digital/2026/${day}/p${id}.cr3`, tile: null, loupe: null, sharp: { subject: 1.5, eyes: 'open' }, sweep: null,
+      photos.push({ id, hash: `h${id}`, tail: `Raws/Digital/2026/${day}/p${id}.cr3`, tile: shot(id), loupe: shot(id), sharp: { subject: 1.5, eyes: 'open' }, sweep: null,
         width: 6000, height: 4000, status: 'unflagged', rotate: 0, stack: 0, stars: 0,
         reachable: true, tile_failed: false, date_taken: `${day} 12:00:00`, camera_model: 'EOS R5' });
     }
   }
   photos[0].stack = 3;
   const members = [1, 2, 3].map((n) => ({ ...photos[0], id: 1000 + n, stack: 0, stack_of: 1,
-    tail: `Raws/Digital/2026/2026-09-08/m${n}.cr3` }));
+    tile: shot(N + n), loupe: shot(N + n), tail: `Raws/Digital/2026/2026-09-08/m${n}.cr3` }));
   const shown = (view) => {
     const collapsed = view && view.collapsed;
     const open = collapsed ? (view.expanded || []).includes(1) : !((view && view.folded) || []).includes(1);
@@ -112,7 +123,41 @@ STUB = r"""<script>
 </script>"""
 
 
-def build() -> Path:
+PICTURES = {".jpg", ".jpeg", ".png", ".webp", ".avif"}
+ENOUGH = 200  # more photographs than the fake library can show at once
+
+
+def pictures(folder: Path | None) -> list[str]:
+    """Photographs from a folder, in one settled order, as URLs a page can
+    load. Sorted rather than taken as the disk hands them over, so the same
+    photograph gets the same file on every run and every machine; and only
+    as many as the fake library has room for, so the page does not carry a
+    thousand names it will never draw."""
+
+    if folder is None:
+        return []
+    found = sorted(path for path in folder.rglob("*")
+                   if path.is_file() and path.suffix.lower() in PICTURES)
+    if not found:
+        raise SystemExit(f"harness: no photographs under {folder}")
+    return [path.resolve().as_uri() for path in found[:ENOUGH]]
+
+
+def named(argv: list[str]) -> Path | None:
+    """Where the real photographs are, from the flag or the environment."""
+
+    where = os.environ.get("AZIMUTH_HARNESS_TILES") or ""
+    if "--tiles" in argv:
+        where = argv[argv.index("--tiles") + 1]
+    if not where:
+        return None
+    folder = Path(where).expanduser()
+    if not folder.is_dir():
+        raise SystemExit(f"harness: {folder} is not a folder")
+    return folder
+
+
+def build(tiles: Path | None = None) -> Path:
     # The window's own rule: the document is rebuilt when any source is newer
     # than it, so a proof never runs against the UI of an hour ago.
     sources = [ROOT / "web" / "templates" / "v2.html", *(ROOT / "web" / "static" / "v2").rglob("*")]
@@ -122,14 +167,16 @@ def build() -> Path:
         subprocess.run([sys.executable, str(ROOT / "scripts" / "build_desktop_ui.py")], check=True)
     document = DOCUMENT.read_text(encoding="utf-8")
     at = document.index("<script>")
-    OUTPUT.write_text(document[:at] + STUB + document[at:], encoding="utf-8")
+    stub = STUB.replace("__TILES__", json.dumps(pictures(tiles)))
+    OUTPUT.write_text(document[:at] + stub + document[at:], encoding="utf-8")
     return OUTPUT
 
 
 def main() -> int:
-    page = build()
+    argv = sys.argv[1:]
+    page = build(named(argv))
     print(page)
-    if "--build" in sys.argv[1:]:
+    if "--build" in argv:
         return 0
     handler = lambda *a, **k: http.server.SimpleHTTPRequestHandler(*a, directory=str(OUTPUT.parent), **k)
     with http.server.ThreadingHTTPServer(("127.0.0.1", PORT), handler) as server:
