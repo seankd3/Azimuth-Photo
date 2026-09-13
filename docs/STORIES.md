@@ -187,27 +187,26 @@ The gap in the market is the same one `docs/ORGANIZING.md` found: no tool
 lets the person correct the machine and have the machine learn from it.
 Here the correction is a swap, and the learning is the next chapter's leads.
 
-## Where it gets clever
+## Nothing extra
 
-Sean, 09-13: "lets keep working on the story idea lets get creative and
-clever with it". Each of these stands on a fact the archive already holds;
-the cost column says what more it needs.
+Sean, 09-13, on a first list of nine additions: "those are interesting
+gimmicks but i want elegance not occasionally useful bells". The list is
+gone. Three of its items were the one rule again, and belong to the
+surfaces they came from rather than to a list of features:
 
-| Idea | What it does | Stands on | Costs |
-|---|---|---|---|
-| **The heartbeat** | Frames per hour across the story, drawn as one line along the spine. Peaks propose beats; flat days and gaps ("three days, nothing") are shown as they are. | `date_taken` | nothing new |
-| **The grease pencil** | The wall drawn as a contact sheet: the lead circled, alikes bracketed, cut frames dimmed but present. The whole argument in the rest state. | scenes, the guard | drawing only |
-| **Rhythm** | Wide, medium, tight read from face size and subject box; three tights in a row get a quiet mark and a wide from the same scene is offered as a breath. | the sharpness pass's boxes | one rule |
-| **Leads of leads** | The post's twelve is a story inside the book's sixty: the same pass over the sixty, kept in step when the book changes. | stories as albums | nested budget |
-| **The second look** | When the pass ends, one screen: the highest-rated frame from every scene that gave nothing. One key admits. | ratings, scenes | one screen |
-| **Two curators** | Decisions carry provenance. A second person walks the same pass; agreement settles, disagreement shows both frames with two initials, and the fit learns from both. | the decision log's author | a second author on the log |
-| **Captions that are facts** | "Mount Washington · 4:12 pm · the two of you", from place, time and people; never invented prose, always editable, searchable. | places, people, dates | a template |
-| **Returns** | A place seen in more than one story is noticed, and the earlier frame is offered beside the new. | places, stories | a query |
-| **A story from a sentence** | "the engagement trip" in the search box: the meaning search plus time clustering proposes the chapters. | search, sessions | a starting shape |
+- **The spine is the story's pulse.** Chapters drawn to the density of
+  shooting (frames per hour) is not a chart added to the spine; it is what
+  the spine is, and the gaps in it are the story's gaps.
+- **The second look is the pass's undo for omission.** When the pass ends,
+  the highest-rated frame from every scene that gave nothing, one screen,
+  one key to admit. A pass that cannot be checked is a pass a person will
+  not trust.
+- **The post is the book's budget applied again.** Twelve from the sixty is
+  the same pass over the sixty; nothing new is built for it.
 
-The four that cost nearly nothing come first (the heartbeat, the second
-look, captions, leads of leads). The two with the most life in them are two
-curators and returns, and both wait on the pass existing.
+Everything else on that list (rhythm marks, captions, returns, a second
+curator, a story from a sentence) is recorded below as rejected, with the
+one-line reason each earned.
 
 ## Deliberate rejections
 
@@ -217,6 +216,11 @@ curators and returns, and both wait on the pass existing.
   The machine's whole job is to make the walk short.
 - **A layout tool.** Order and cover are the story's; pages and spreads are
   export's, later, from the same order.
+- **Bells.** Rhythm marks (wide, medium, tight), factual captions, a place
+  noticed across two stories, a second curator, a story from a sentence:
+  each occasionally useful, none of them the rule, every one a surface to
+  maintain. A person who wants a caption types one; a person who wants
+  rhythm has the wall in front of them.
 - **A separate application.** Stories are albums; scenes are stacks the
   space widened; leads are rounds; chapters are sessions with places. The
   workspace is one stage and one set of keys.
