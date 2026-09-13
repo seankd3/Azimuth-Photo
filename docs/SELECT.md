@@ -351,7 +351,8 @@ arrives does not silently join the kept set and does not silently vanish:
 it arrives at the boundary. A new frame whose score clears the weakest
 keeper is **a challenger**, and the select says so quietly in the sidebar
 ("Portfolio · 1 challenger"). One key opens a duel between the challenger
-and the frame it threatens; the winner is kept, and the round is a round.
+and the frame it threatens; the winner is kept, and the duel is a round in
+the same log as every other.
 That is the whole mechanism, and it is the same boundary again.
 
 This is what separates the three kinds of work without three designs:
